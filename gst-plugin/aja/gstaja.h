@@ -196,6 +196,7 @@ struct _GstAjaInput
     gboolean            video_enabled;
     GstElement          *hevcsrc;
     gboolean            hevc_enabled;
+    void (*start_streams) (GstElement *videosrc);
 };
 
 #define GST_TYPE_AJA_CLOCK \

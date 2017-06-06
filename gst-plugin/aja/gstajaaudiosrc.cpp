@@ -45,7 +45,7 @@ GST_DEBUG_CATEGORY_STATIC (gst_aja_audio_src_debug);
 #define DEFAULT_CONNECTION      (GST_AJA_AUDIO_CONNECTION_AUTO)
 #define DEFAULT_DEVICE_NUMBER   (0)
 #define DEFAULT_INPUT_CHANNEL   (0)
-#define DEFAULT_NUM_CHANNELS    (16)
+#define DEFAULT_CHANNELS        (8)
 #define DEFAULT_QUEUE_SIZE      (5)
 
 #define DEFAULT_ALIGNMENT_THRESHOLD   (40 * GST_MSECOND)
@@ -56,18 +56,20 @@ enum
     PROP_0,
     PROP_DEVICE_NUMBER,
     PROP_INPUT_CHANNEL,
-    PROP_NUM_CHANNELS,
+    PROP_CHANNELS,
     PROP_ALIGNMENT_THRESHOLD,
     PROP_DISCONT_WAIT,
-    PROP_QUEUE_SIZE
+    PROP_QUEUE_SIZE,
 };
 
 static GstStaticPadTemplate gst_aja_audio_src_template = GST_STATIC_PAD_TEMPLATE ("src",
                                                                                   GST_PAD_SRC,
                                                                                   GST_PAD_ALWAYS,
                                                                                   GST_STATIC_CAPS
-                                                                                  ("audio/x-raw, format={S16LE,S32LE}, channels=16, rate=48000, "
-                                                                                   "layout=interleaved")
+                                                                                  ("audio/x-raw, format={S16LE,S32LE}, channels=[1,2], rate=48000, "
+                                                                                   "layout=interleaved;"
+                                                                                   "audio/x-raw, format={S16LE,S32LE}, channels=[3,16], rate=48000, "
+                                                                                   "channel-mask = (bitmask) 0, layout=interleaved;")
                                                                                   );
 
 
@@ -166,13 +168,14 @@ gst_aja_audio_src_class_init (GstAjaAudioSrcClass * klass)
                                                         "Input channel to use",
                                                         0, G_MAXINT, DEFAULT_INPUT_CHANNEL,
                                                         (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT)));
-    
-    g_object_class_install_property (gobject_class, PROP_NUM_CHANNELS,
-                                     g_param_spec_uint ("num-channels",
-                                                        "Number of channels",
-                                                        "Number of channels to use (2-16)",
-                                                        0, G_MAXINT, DEFAULT_INPUT_CHANNEL,
+
+    g_object_class_install_property (gobject_class, PROP_CHANNELS,
+                                     g_param_spec_uint ("channels",
+                                                        "Channels",
+                                                        "Number of audio channels",
+                                                        2, 16, DEFAULT_CHANNELS,
                                                         (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT)));
+    
 
     g_object_class_install_property (gobject_class, PROP_ALIGNMENT_THRESHOLD,
                                      g_param_spec_uint64 ("alignment-threshold",
@@ -211,6 +214,7 @@ gst_aja_audio_src_init (GstAjaAudioSrc *src)
     
     src->input_channel = DEFAULT_INPUT_CHANNEL;
     src->device_number = DEFAULT_DEVICE_NUMBER;
+    src->channels = DEFAULT_CHANNELS;
     src->queue_size = DEFAULT_QUEUE_SIZE;
     src->alignment_threshold = DEFAULT_ALIGNMENT_THRESHOLD;
     src->discont_wait = DEFAULT_DISCONT_WAIT;
@@ -238,6 +242,10 @@ gst_aja_audio_src_set_property (GObject * object, guint property_id, const GValu
             
         case PROP_INPUT_CHANNEL:
             src->input_channel = g_value_get_uint (value);
+            break;
+
+        case PROP_CHANNELS:
+            src->channels = g_value_get_uint (value);
             break;
             
         case PROP_ALIGNMENT_THRESHOLD:
@@ -273,6 +281,10 @@ gst_aja_audio_src_get_property (GObject * object, guint property_id, GValue * va
         case PROP_INPUT_CHANNEL:
             g_value_set_uint (value, src->input_channel);
             break;
+
+        case PROP_CHANNELS:
+            g_value_set_uint (value, src->channels);
+            break;
             
         case PROP_ALIGNMENT_THRESHOLD:
             g_value_set_uint64 (value, src->alignment_threshold);
@@ -285,7 +297,6 @@ gst_aja_audio_src_get_property (GObject * object, guint property_id, GValue * va
         case PROP_QUEUE_SIZE:
             g_value_set_uint (value, src->queue_size);
             break;
-            
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
             break;
@@ -297,6 +308,9 @@ gst_aja_audio_src_finalize (GObject * object)
 {
     GstAjaAudioSrc *src = GST_AJA_AUDIO_SRC (object);
     GST_DEBUG_OBJECT (src, "finalize");
+
+    g_queue_foreach (&src->current_packets, (GFunc) aja_capture_audio_packet_free, NULL);
+    g_queue_clear (&src->current_packets);
 
     g_mutex_clear (&src->lock);
     g_cond_clear (&src->cond);
@@ -331,12 +345,14 @@ gst_aja_audio_src_set_caps (GstBaseSrc * bsrc, GstCaps * caps)
     
     if (!gst_audio_info_from_caps (&src->info, caps))
         return FALSE;
+
+    // FIXME do something to actually enable audio? is it always enabled?
+    // FIXME Is there anything we can actually configure based on the caps?
     
     g_mutex_lock (&src->input->lock);
-    // PSM fixme we must turn on the stream here and use the video src element to do it
-    //src->input->audio_enabled = TRUE;
-    //if (src->input->start_streams && src->input->videosrc)
-    //    src->input->start_streams (src->input->videosrc);
+    src->input->audio_enabled = TRUE;
+    if (src->input->start_streams && src->input->videosrc)
+        src->input->start_streams (src->input->videosrc);
     g_mutex_unlock (&src->input->lock);
     
     return TRUE;
@@ -351,8 +367,18 @@ gst_aja_audio_src_get_caps (GstBaseSrc * bsrc, GstCaps * filter)
     // We don't support renegotiation
     GstCaps *caps = gst_pad_get_current_caps (GST_BASE_SRC_PAD (bsrc));
     
-    if (!caps)
+    if (!caps) {
         caps = gst_pad_get_pad_template_caps (GST_BASE_SRC_PAD (bsrc));
+        if (src->channels) {
+          GstCaps *tmp, *channel_filter;
+
+          channel_filter = gst_caps_new_simple ("audio/x-raw", "channels", G_TYPE_INT, src->channels, NULL);
+          tmp = gst_caps_intersect (caps, channel_filter);
+          gst_caps_unref (caps);
+          gst_caps_unref (channel_filter);
+          caps = tmp;
+        }
+    }
     
     if (filter)
     {
@@ -451,29 +477,24 @@ gst_aja_audio_src_open (GstAjaAudioSrc * src)
         GST_ERROR_OBJECT (src, "Failed to acquire input");
         return FALSE;
     }
-    
+
+    g_mutex_lock (&src->input->lock);
     status = src->input->ntv2AVHevc->Open ();
     if (!AJA_SUCCESS (status))
     {
         GST_ERROR_OBJECT (src, "Failed to open input");
+        g_mutex_unlock (&src->input->lock);
+        return FALSE;
+    }
+
+    status = src->input->ntv2AVHevc->InitAudio (&src->channels);
+    if (status != AJA_STATUS_SUCCESS) {
+        GST_ERROR_OBJECT (src, "Failed to initialize audio");
+        g_mutex_unlock (&src->input->lock);
         return FALSE;
     }
     
-    status = src->input->ntv2AVHevc->Init (src->input->mode->videoPreset,
-                                           src->input->mode->videoFormat,
-                                           src->input->mode->bitDepth,
-                                           src->input->mode->is422,
-                                           true,
-                                           false,
-                                           src->input->mode->isQuad,
-                                           false, false);
-    if (!AJA_SUCCESS (status))
-    {
-        GST_ERROR_OBJECT (src, "Failed to initialize input");
-        return FALSE;
-    }
-    
-    src->input->ntv2AVHevc->SetCallback(AUDIO_CALLBACK, (int64_t)&gst_aja_audio_src_audio_callback, (int64_t)src);
+    g_mutex_unlock (&src->input->lock);
 
     return TRUE;
 }
@@ -485,22 +506,13 @@ gst_aja_audio_src_close (GstAjaAudioSrc * src)
     
     if (src->input)
     {
+        // The real shutdown will happen by the videosrc
         g_mutex_lock (&src->input->lock);
-        
-        if (src->input->ntv2AVHevc)
-        {
-            src->input->ntv2AVHevc->Quit ();
-            src->input->ntv2AVHevc->Close ();
-            delete src->input->ntv2AVHevc;
-            src->input->ntv2AVHevc = NULL;
-            GST_DEBUG_OBJECT (src, "shut down ntv2HEVC");
-        }
-        
-        src->input->mode = NULL;
         src->input->audio_enabled = FALSE;
+        gst_object_unref (src->input->audiosrc);
         src->input->audiosrc = NULL;
-        
         g_mutex_unlock (&src->input->lock);
+        src->input = NULL;
     }
     
     return TRUE;
@@ -518,8 +530,8 @@ gst_aja_audio_src_stop (GstAjaAudioSrc * src)
     {
         g_mutex_lock (&src->input->lock);
         src->input->audio_enabled = FALSE;
+        src->input->ntv2AVHevc->SetCallback(AUDIO_CALLBACK, 0, 0);
         g_mutex_unlock (&src->input->lock);
-        // PSM fixme probably need to stop buffers from comming
     }
     
     return TRUE;
@@ -552,6 +564,7 @@ gst_aja_audio_src_change_state (GstElement * element, GstStateChange transition)
             g_mutex_lock (&src->input->lock);
             if (src->input->videosrc)
                 videosrc = GST_ELEMENT_CAST (gst_object_ref (src->input->videosrc));
+            src->input->ntv2AVHevc->SetCallback(AUDIO_CALLBACK, (int64_t)&gst_aja_audio_src_audio_callback, (int64_t)src);
             g_mutex_unlock (&src->input->lock);
             
             if (!videosrc)
@@ -696,8 +709,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     
     ap->audio_src = p->audio_src;
     ap->audio_buff = p->audio_buff;
-    if (ap->audio_src->input)
-        ap->audio_src->input->ntv2AVHevc->AddRefAudioBuffer(ap->audio_buff);
+    src->input->ntv2AVHevc->AddRefAudioBuffer(ap->audio_buff);
  
 
     timestamp = p->capture_time;

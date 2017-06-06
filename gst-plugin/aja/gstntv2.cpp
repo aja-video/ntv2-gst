@@ -33,7 +33,7 @@ NTV2GstAVHevc::NTV2GstAVHevc (const string inDeviceSpecifier, const NTV2Channel 
     mVideoFormat			(NTV2_MAX_NUM_VIDEO_FORMATS),
     mMultiStream			(false),
 	mAudioSystem			(NTV2_AUDIOSYSTEM_1),
-    mNumAudioChannels       (0),
+        mNumAudioChannels               (0),
 	mLastFrame				(false),
 	mLastFrameInput			(false),
 	mLastFrameVideoOut      (false),
@@ -86,6 +86,9 @@ NTV2GstAVHevc::~NTV2GstAVHevc ()
 
 AJAStatus NTV2GstAVHevc::Open (void)
 {
+    if (mDeviceID != DEVICE_ID_NOTFOUND)
+        return AJA_STATUS_SUCCESS;
+
     //	Open the device...
 	if (!CNTV2DeviceScanner::GetFirstDeviceFromArgument (mDeviceSpecifier, mDevice))
     {
@@ -103,6 +106,8 @@ AJAStatus NTV2GstAVHevc::Open (void)
 AJAStatus NTV2GstAVHevc::Close (void)
 {
     AJAStatus	status	(AJA_STATUS_SUCCESS);
+
+    mDeviceID = DEVICE_ID_NOTFOUND;;
 
     return status;
 }
@@ -205,17 +210,7 @@ AJAStatus NTV2GstAVHevc::Init (const M31VideoPreset         inPreset,
     //	Route input signals to frame buffers
 	RouteInputSignal ();
     
-	//	Setup audio buffer
-	status = SetupAudio ();
-	if (AJA_FAILURE (status))
-    {
-        GST_ERROR ("Audio setup failure");
-		return status;
-    }
-    
-	//	Setup to capture video/audio/anc input
-    SetupAutoCirculate ();
-    
+
 	//	Setup codec
     if (mHevcOutput)
     {
@@ -227,12 +222,29 @@ AJAStatus NTV2GstAVHevc::Init (const M31VideoPreset         inPreset,
         }
     }
     
-	//	Setup the circular buffers
-	SetupHostBuffers ();
-    
     return AJA_STATUS_SUCCESS;
 }
 
+AJAStatus NTV2GstAVHevc::InitAudio (uint32_t *numAudioChannels)
+{
+    AJAStatus	status	(AJA_STATUS_SUCCESS);
+
+    mNumAudioChannels = *numAudioChannels;
+
+	//	Setup audio buffer
+	status = SetupAudio ();
+	if (AJA_FAILURE (status))
+    {
+        GST_ERROR ("Audio setup failure");
+		return status;
+    }
+
+    ULWord nchannels = -1;
+    mDevice.GetNumberAudioChannels (nchannels, mAudioSystem);
+    *numAudioChannels = nchannels;
+
+    return status;
+}
 
 void NTV2GstAVHevc::Quit (void)
 {
@@ -601,9 +613,15 @@ AJAStatus NTV2GstAVHevc::SetupAudio (void)
 	//	Have the audio system capture audio from the designated device input (i.e., ch1 uses SDIIn1, ch2 uses SDIIn2, etc.)...
 	mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, ::NTV2ChannelToEmbeddedAudioInput (mInputChannel));
 
-    mNumAudioChannels = ::NTV2DeviceGetMaxAudioChannels (mDeviceID);
+    if (mNumAudioChannels == 0)
+      mNumAudioChannels = ::NTV2DeviceGetMaxAudioChannels (mDeviceID);
+    if (mNumAudioChannels > ::NTV2DeviceGetMaxAudioChannels (mDeviceID))
+      return AJA_STATUS_FAIL;
+
+    // Setting channels or getting the maximum number of channels generally fails and we always
+    // get all channels available to the card
     mDevice.SetNumberAudioChannels (mNumAudioChannels, mAudioSystem);
-	mDevice.SetAudioRate (NTV2_AUDIO_48K, mAudioSystem);
+    mDevice.SetAudioRate (NTV2_AUDIO_48K, mAudioSystem);
     mDevice.SetEmbeddedAudioClock (NTV2_EMBEDDED_AUDIO_CLOCK_VIDEO_INPUT, mAudioSystem);
 
 	//	The on-device audio buffer should be 4MB to work best across all devices & platforms...
@@ -830,6 +848,12 @@ void NTV2GstAVHevc::SetupAutoCirculate (void)
 
 AJAStatus NTV2GstAVHevc::Run ()
 {
+	//	Setup to capture video/audio/anc input
+    SetupAutoCirculate ();
+    
+	//	Setup the circular buffers
+	SetupHostBuffers ();
+
 	if (mDevice.GetInputVideoFormat (mInputSource) == NTV2_FORMAT_UNKNOWN)
         GST_WARNING ("No video signal present on the input connector");
 
@@ -1041,7 +1065,7 @@ void NTV2GstAVHevc::VideoOutputWorker (void)
                 if (pDstFrame)
                 {
                     memcpy(pDstFrame->pVideoBuffer, pFrameData->pVideoBuffer, pFrameData->videoDataSize);
-                    pDstFrame->fameNumber = mVideoOutFrameCount;
+                    pDstFrame->frameNumber = mVideoOutFrameCount;
                     pDstFrame->videoDataSize = pFrameData->videoDataSize;
                     pDstFrame->timeCodeDBB = pFrameData->timeCodeDBB;
                     pDstFrame->timeCodeLow = pFrameData->timeCodeLow;
@@ -1066,7 +1090,7 @@ void NTV2GstAVHevc::VideoOutputWorker (void)
                 
                 if (pFrameData->lastFrame)
 				{
-                    GST_INFO ("Video out last frame number %d", mHevcOutFrameCount);
+                    GST_INFO ("Video out last frame number %d", mVideoOutFrameCount);
 					mLastFrameVideoOut = true;
 				}
                 
@@ -1274,7 +1298,7 @@ void NTV2GstAVHevc::HevcOutputWorker (void)
                 if (pDstFrame)
                 {
                     memcpy(pDstFrame->pVideoBuffer, pFrameData->pVideoBuffer, pFrameData->videoDataSize);
-                    pDstFrame->fameNumber = mHevcOutFrameCount;
+                    pDstFrame->frameNumber = mHevcOutFrameCount;
                     pDstFrame->videoDataSize = pFrameData->videoDataSize;
                     pDstFrame->timeCodeDBB = pFrameData->timeCodeDBB;
                     pDstFrame->timeCodeLow = pFrameData->timeCodeLow;
@@ -1351,22 +1375,45 @@ void NTV2GstAVHevc::AudioOutputWorker (void)
     while (!mGlobalQuit)
     {
         // wait for the next codec hevc frame
+        printf("waiting audio\n");
         AjaAudioBuff *	pFrameData (mAudioInputCircularBuffer.StartConsumeNextBuffer ());
+        printf("waited audio\n");
         if (pFrameData)
         {
+            printf("have audio\n");
             if (!mLastFrameAudioOut)
             {
+                AjaAudioBuff * pDstFrame = AcquireAudioBuffer();
+                if (pDstFrame)
+                {
+                    printf("have audio output %lu %lu\n", pFrameData->audioDataSize, pFrameData->timeStamp);
+                    memcpy(pDstFrame->pAudioBuffer, pFrameData->pAudioBuffer, pFrameData->audioDataSize);
+                    pDstFrame->audioDataSize = pFrameData->audioDataSize;
+                    pDstFrame->timeStamp = pFrameData->timeStamp;
+                    pDstFrame->lastFrame = pFrameData->lastFrame;
+
+                    // The time duration is based off the frame rate and for now we will pass the absolute
+                    // time which will be adjusted by the start time in the layer above.
+                    pDstFrame->timeDuration = (uint64_t)mTimeBase.FramesToMicroseconds(1)*1000;
+                    GetHardwareClock(ASECOND, &pDstFrame->timeStamp);
+
+                    // Possible callbacks are not setup yet so make sure we release the buffer if
+                    // no one is there to catch them
+                    if (!DoCallback(AUDIO_CALLBACK, (int64_t) pDstFrame))
+                        ReleaseAudioBuffer(pDstFrame);
+                }
+
                 if (pFrameData->lastFrame)
                 {
                     GST_INFO ("Audio out last frame number %d", mAudioOutFrameCount);
                     mLastFrameAudioOut = true;
                 }
+
+                mAudioOutFrameCount++;
+
+                // release the hevc buffer
+                mAudioInputCircularBuffer.EndConsumeNextBuffer ();
             }
-
-            mAudioOutFrameCount++;
-
-            // release the hevc buffer
-            mAudioInputCircularBuffer.EndConsumeNextBuffer ();
         }
     } // loop til quit signaled
 }

@@ -41,7 +41,7 @@ typedef struct
 {
     uint32_t        bufferId;               /// Unique buffer number to identify buffer when it come back to us to be freed
     uint32_t        bufferRef;              /// Buffer use counter
-    uint32_t        fameNumber;             /// Frame number
+    uint32_t        frameNumber;            /// Frame number
 	uint32_t *		pVideoBuffer;			///	Pointer to host video buffer
     uint32_t		videoBufferSize;		///	Size of host video buffer (bytes)
     uint32_t		videoDataSize;			///	Size of video data (bytes)
@@ -123,6 +123,8 @@ class NTV2GstAVHevc
                                 const bool                      inQuadMode      = false,
                                 const bool                      inTimeCode      = false,
                                 const bool                      inInfoData      = false);
+
+        virtual AJAStatus InitAudio (uint32_t *numAudioChannels);
 
         /**
             @brief	Gracefully stops me from running.
@@ -368,8 +370,7 @@ class NTV2GstAVHevc
         bool                        mWithInfo;              /// Demonstrates how to configure picture information mode
         bool                        mWithAnc;               /// Add timecode burn
 		NTV2AudioSystem				mAudioSystem;			///	The audio system I'm using
-        uint32_t                    mNumAudioChannels;      /// Number of input audio channels
-
+                uint32_t                                mNumAudioChannels;
 		bool						mLastFrame;				///	Set "true" to signal last frame
 		bool						mLastFrameInput;		///	Set "true" to signal last frame captured from input
 		bool						mLastFrameVideoOut;     ///	Set "true" to signal last frame of video output

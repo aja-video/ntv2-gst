@@ -45,4 +45,7 @@ noinst_HEADERS = \
 	gstaja.h \
 	gstajavideosrc.h \
 	gstajahevcsrc.h \
+	gstajaaudiosrc.cpp \
+	gstajavideosink.cpp \
+	gstajaaudiosink.cpp \
 	gstntv2.h

@@ -52,6 +52,7 @@ struct _GstAjaAudioSrc
 
     guint                       device_number;
     guint                       input_channel;
+    guint                       channels;
     guint                       queue_size;
     guint64                     next_offset;
 

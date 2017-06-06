@@ -52,16 +52,19 @@ gst_aja_acquire_input (gint deviceNum, gint channel, GstElement * src, gboolean 
     
     g_mutex_lock (&input->lock);
 
-    input->ntv2AVHevc = new NTV2GstAVHevc("0", (NTV2Channel) channel);
-    if (input->ntv2AVHevc == NULL)
-    {
-        GST_ERROR_OBJECT (src, "Failed to acquire input");
-        g_mutex_unlock (&input->lock);
-        return NULL;
+    if (input->ntv2AVHevc == NULL) {
+      // FIXME: Make this configurable
+      input->ntv2AVHevc = new NTV2GstAVHevc("0", (NTV2Channel) channel);
+      if (input->ntv2AVHevc == NULL)
+      {
+          GST_ERROR_OBJECT (src, "Failed to acquire input");
+          g_mutex_unlock (&input->lock);
+          return NULL;
+      }
+      
+      input->clock = gst_aja_clock_new ("GstAjaInputClock");
+      GST_AJA_CLOCK_CAST (input->clock)->input = input;
     }
-    
-    input->clock = gst_aja_clock_new ("GstAjaInputClock");
-    GST_AJA_CLOCK_CAST (input->clock)->input = input;
 
     if (is_audio && !input->audiosrc)
     {
@@ -81,13 +84,10 @@ gst_aja_acquire_input (gint deviceNum, gint channel, GstElement * src, gboolean 
     return NULL;
 }
 
-
-
 #define NTSC    10, 11, false,  "bt601"
 #define PAL     12, 11, true,   "bt601"
 #define HD      1,  1,  false,  "bt709"
 #define UHD     1,  1,  false,  "bt2020"
-
 
 static const GstAjaMode modesRaw[] =
 {
