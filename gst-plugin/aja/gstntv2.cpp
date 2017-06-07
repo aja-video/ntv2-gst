@@ -849,6 +849,21 @@ void NTV2GstAVHevc::SetupAutoCirculate (void)
 
 AJAStatus NTV2GstAVHevc::Run ()
 {
+    mVideoInputFrameCount = 0;
+    mVideoOutFrameCount = 0;
+    mCodecRawFrameCount = 0;
+    mCodecHevcFrameCount = 0;
+    mHevcOutFrameCount = 0;
+    mAudioOutFrameCount = 0;
+    mLastFrame = false;
+    mLastFrameInput  = false;
+    mLastFrameVideoOut = false;
+    mLastFrameHevc = false;
+    mLastFrameHevcOut = false;
+    mLastFrameAudioOut = false;
+    mGlobalQuit = false;
+
+      
 	//	Setup to capture video/audio/anc input
     SetupAutoCirculate ();
     
