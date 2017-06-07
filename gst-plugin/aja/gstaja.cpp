@@ -24,7 +24,7 @@
 #include <gst/gst.h>
 #include "gstaja.h"
 #include "gstajavideosrc.h"
-#include "gstajahevcsrc.h"
+//#include "gstajahevcsrc.h"
 #include "gstajavideosink.h"
 #include "gstajaaudiosrc.h"
 #include "gstajaaudiosink.h"
@@ -505,7 +505,7 @@ aja_init (GstPlugin * plugin)
     memset (devices, 0x0, sizeof (devices));
 
 	gst_element_register (plugin, "ajavideosrc", GST_RANK_NONE, GST_TYPE_AJA_VIDEO_SRC);
-    gst_element_register (plugin, "ajahevcsrc", GST_RANK_NONE, GST_TYPE_AJA_HEVC_SRC);
+  //  gst_element_register (plugin, "ajahevcsrc", GST_RANK_NONE, GST_TYPE_AJA_HEVC_SRC);
   	gst_element_register (plugin, "ajaaudiosrc", GST_RANK_NONE, GST_TYPE_AJA_AUDIO_SRC);
 
     // These don't work yet so lets not register them
