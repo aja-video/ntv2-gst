@@ -52,7 +52,6 @@ typedef struct
     uint32_t        timeCodeLow;            /// Time code data low
     uint32_t        timeCodeHigh;           /// Time code data high
     uint64_t        timeStamp;              /// Time stamp of video data
-    uint64_t        timeDuration;           /// Time duration
     bool			lastFrame;              /// Indicates last captured frame
 } AjaVideoBuff;
 
@@ -61,11 +60,11 @@ typedef struct
 {
     uint32_t        bufferId;               /// Unique buffer number to identify buffer when it come back to us to be freed
     uint32_t        bufferRef;              /// Buffer use counter
+    uint32_t        frameNumber;            /// Frame number
 	uint32_t *		pAudioBuffer;			///	Pointer to host audio buffer
     uint32_t		audioBufferSize;		///	Size of host audio buffer (bytes)
     uint32_t		audioDataSize;			///	Size of audio data (bytes)
     uint64_t        timeStamp;              /// Time stamp of video data
-    uint64_t        timeDuration;           /// Time Duration
 	bool			lastFrame;				/// Indicates last captured frame
 } AjaAudioBuff;
 

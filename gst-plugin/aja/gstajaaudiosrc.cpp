@@ -66,9 +66,9 @@ static GstStaticPadTemplate gst_aja_audio_src_template = GST_STATIC_PAD_TEMPLATE
                                                                                   GST_PAD_SRC,
                                                                                   GST_PAD_ALWAYS,
                                                                                   GST_STATIC_CAPS
-                                                                                  ("audio/x-raw, format={S16LE,S32LE}, channels=[1,2], rate=48000, "
+                                                                                  ("audio/x-raw, format=S32LE, channels=[1,2], rate=48000, "
                                                                                    "layout=interleaved;"
-                                                                                   "audio/x-raw, format={S16LE,S32LE}, channels=[3,16], rate=48000, "
+                                                                                   "audio/x-raw, format=S32LE, channels=[3,16], rate=48000, "
                                                                                    "channel-mask = (bitmask) 0, layout=interleaved;")
                                                                                   );
 
@@ -78,6 +78,7 @@ typedef struct
     GstAjaAudioSrc              *audio_src;
     AjaAudioBuff                *audio_buff;
     GstClockTime                capture_time;
+    GstClockTime                stream_time;
 } AjaCaptureAudioPacket;
 
 static void
@@ -618,9 +619,12 @@ out:
 }
 
 static void
-gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff, GstClockTime capture_time)
+gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
 {
     GstAjaVideoSrc *videosrc = NULL;
+    GstClockTime stream_time, timestamp;
+
+    stream_time = gst_util_uint64_scale (audioBuff->frameNumber, src->input->mode->fps_d * GST_SECOND, src->input->mode->fps_n);
 
     //GST_ERROR_OBJECT (src, "Got audio packet at %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_time));
     
@@ -631,9 +635,39 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff, Gs
     
     if (videosrc)
     {
-        gst_aja_video_src_convert_to_external_clock (videosrc, &capture_time, NULL);
+        // FIXME: This is not a problem anymore after switching to bufferpools
+        // and a single layer of copying in AJA: we will always get video
+        // first then
+        while (!videosrc->current_time_mapping.b)
+          g_usleep (10);
+        g_mutex_lock (&videosrc->lock);
+
+        if (videosrc->first_time == GST_CLOCK_TIME_NONE)
+            videosrc->first_time = stream_time;
+
+        if (videosrc->skip_first_time > 0
+            && stream_time - videosrc->first_time < videosrc->skip_first_time) {
+            GST_DEBUG_OBJECT (src,
+                "Skipping frame as requested: %" GST_TIME_FORMAT " < %"
+                GST_TIME_FORMAT, GST_TIME_ARGS (stream_time),
+                GST_TIME_ARGS (videosrc->skip_first_time + videosrc->first_time));
+            g_mutex_unlock (&videosrc->lock);
+            src->input->ntv2AVHevc->ReleaseAudioBuffer(audioBuff);
+            return;
+        }
+
+        if (videosrc->output_stream_time)
+            timestamp = stream_time;
+        else
+            timestamp = gst_clock_adjust_with_calibration (NULL, stream_time,
+                videosrc->current_time_mapping.xbase,
+                videosrc->current_time_mapping.b, videosrc->current_time_mapping.num,
+                videosrc->current_time_mapping.den);
+        g_mutex_unlock (&videosrc->lock);
         gst_object_unref (videosrc);
-        GST_LOG_OBJECT (src, "Actual timestamp %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_time));
+        //GST_LOG_OBJECT (src, "Actual timestamp %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_time));
+    } else {
+      timestamp = GST_CLOCK_TIME_NONE;
     }
     
     g_mutex_lock (&src->lock);
@@ -651,7 +685,8 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff, Gs
         f = (AjaCaptureAudioPacket *) g_malloc0 (sizeof (AjaCaptureAudioPacket));
         f->audio_src = src;
         f->audio_buff = audioBuff;
-        f->capture_time = capture_time;
+        f->capture_time = timestamp;
+        f->stream_time = stream_time;
         
         g_queue_push_tail (&src->current_packets, f);
         g_cond_signal (&src->cond);
@@ -679,6 +714,8 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     GstClockTime start_time, end_time;
     guint64 start_offset, end_offset;
     gboolean discont = FALSE;
+    static GstStaticCaps stream_reference =
+      GST_STATIC_CAPS ("timestamp/x-aja-stream");
     
     g_mutex_lock (&src->lock);
     while (g_queue_is_empty (&src->current_packets) && !src->flushing)
@@ -699,6 +736,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     
     data = (const guint8 *)p->audio_buff->pAudioBuffer;
     data_size = (gsize)p->audio_buff->audioDataSize;
+    sample_count = data_size / src->info.bpf;
     
     ap = (AjaAudioPacket *) g_malloc0 (sizeof (AjaAudioPacket));
 
@@ -720,7 +758,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     // Convert to the sample numbers
     start_offset = gst_util_uint64_scale (start_time, src->info.rate, GST_SECOND);
     
-    end_offset = start_offset + (data_size / src->info.bpf);
+    end_offset = start_offset + sample_count;
     end_time = gst_util_uint64_scale_int (end_offset, GST_SECOND, src->info.rate);
     
     duration = end_time - start_time;
@@ -776,11 +814,11 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
                              src->next_offset, start_offset);
         GST_BUFFER_FLAG_SET (*buffer, GST_BUFFER_FLAG_DISCONT);
         src->next_offset = end_offset;
+        src->discont_time = GST_CLOCK_TIME_NONE;
     }
     else
     {
         // No discont, just keep counting
-        src->discont_time = GST_CLOCK_TIME_NONE;
         timestamp = gst_util_uint64_scale (src->next_offset, GST_SECOND, src->info.rate);
         src->next_offset += sample_count;
         duration = gst_util_uint64_scale (src->next_offset, GST_SECOND, src->info.rate) - timestamp;
@@ -788,6 +826,12 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     
     GST_BUFFER_TIMESTAMP (*buffer) = timestamp;
     GST_BUFFER_DURATION (*buffer) = duration;
+
+#if GST_CHECK_VERSION (1, 13, 0)
+    gst_buffer_add_reference_timestamp_meta (*buffer,
+        gst_static_caps_get (&stream_reference), p->stream_time,
+        NULL);
+#endif
     
 #if 0
     GST_DEBUG_OBJECT (src,
@@ -810,7 +854,7 @@ gst_aja_audio_src_audio_callback(int64_t refcon, int64_t msg)
     if (src->input->audio_enabled == FALSE)
         return FALSE;
     
-    gst_aja_audio_src_got_packet(src, audioBuffer, audioBuffer->timeStamp);
+    gst_aja_audio_src_got_packet(src, audioBuffer);
     return TRUE;
 }
 

@@ -56,9 +56,24 @@ struct _GstAjaVideoSrc
     guint                       queue_size;
     guint                       input_channel;
     guint                       device_number;
+    gboolean                    output_stream_time;
+    GstClockTime                skip_first_time;
 
-    GstClockTime                internal_base_time;
-    GstClockTime                external_base_time;
+    GstClockTime first_time;
+    GstClockTime *times;
+    GstClockTime *times_temp;
+    guint window_size, window_fill;
+    gboolean window_filled;
+    guint window_skip, window_skip_count;
+    struct {
+      GstClockTime xbase, b;
+      GstClockTime num, den;
+    } current_time_mapping;
+    struct {
+      GstClockTime xbase, b;
+      GstClockTime num, den;
+    } next_time_mapping;
+    gboolean next_time_mapping_pending;
 };
 
 struct _GstAjaVideoSrcClass
@@ -67,7 +82,6 @@ struct _GstAjaVideoSrcClass
 };
 
 GType gst_aja_video_src_get_type (void);
-void gst_aja_video_src_convert_to_external_clock (GstAjaVideoSrc * self, GstClockTime * timestamp, GstClockTime * duration);
 
 G_END_DECLS
 

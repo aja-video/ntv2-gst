@@ -184,9 +184,7 @@ struct _GstAjaInput
     NTV2EngineState     ntv2EngineState;
     const GstAjaMode    *mode;
 
-    GstClock            *clock;
-    GstClockTime        clock_start_time, clock_offset, clock_last_time, clock_epoch;
-    gboolean            started, clock_restart;
+    gboolean            started;
     
     GMutex              lock;
     
@@ -219,7 +217,6 @@ struct _GstAjaClock
 {
     GstSystemClock clock;
 
-    GstAjaInput *input;
     GstAjaOutput *output;
 };
 

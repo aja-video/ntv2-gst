@@ -28,10 +28,12 @@
 GST_DEBUG_CATEGORY_STATIC (gst_aja_video_src_debug);
 #define GST_CAT_DEFAULT gst_aja_video_src_debug
 
-#define DEFAULT_MODE            (GST_AJA_MODE_RAW_720_8_5994p)
-#define DEFAULT_DEVICE_NUMBER   (0)
-#define DEFAULT_INPUT_CHANNEL   (0)
-#define DEFAULT_QUEUE_SIZE      (5)
+#define DEFAULT_MODE               (GST_AJA_MODE_RAW_720_8_5994p)
+#define DEFAULT_DEVICE_NUMBER      (0)
+#define DEFAULT_INPUT_CHANNEL      (0)
+#define DEFAULT_QUEUE_SIZE         (5)
+#define DEFAULT_OUTPUT_STREAM_TIME (FALSE)
+#define DEFAULT_SKIP_FIRST_TIME    (0)
 
 enum
 {
@@ -39,7 +41,9 @@ enum
     PROP_MODE,
     PROP_DEVICE_NUMBER,
     PROP_INPUT_CHANNEL,
-    PROP_QUEUE_SIZE
+    PROP_QUEUE_SIZE,
+    PROP_OUTPUT_STREAM_TIME,
+    PROP_SKIP_FIRST_TIME,
 };
 
 typedef struct
@@ -47,7 +51,7 @@ typedef struct
     GstAjaVideoSrc              *video_src;
     AjaVideoBuff                *video_buff;
     GstClockTime                capture_time;
-    GstClockTime                capture_duration;
+    GstClockTime                stream_time;
     GstAjaModeRawEnum           mode;
 } AjaCaptureVideoFrame;
 
@@ -98,7 +102,6 @@ static gboolean gst_aja_video_src_stop (GstAjaVideoSrc * src);
 static void gst_aja_video_src_start_streams (GstElement * element);
 
 static GstStateChangeReturn gst_aja_video_src_change_state (GstElement * element, GstStateChange transition);
-static GstClock *gst_aja_video_src_provide_clock (GstElement * element);
 
 static gboolean gst_aja_video_src_video_callback (int64_t refcon, int64_t msg);
 
@@ -119,7 +122,6 @@ gst_aja_video_src_class_init (GstAjaVideoSrcClass * klass)
     gobject_class->finalize = gst_aja_video_src_finalize;
 
     element_class->change_state = GST_DEBUG_FUNCPTR (gst_aja_video_src_change_state);
-    element_class->provide_clock = GST_DEBUG_FUNCPTR (gst_aja_video_src_provide_clock);
 
     basesrc_class->get_caps = GST_DEBUG_FUNCPTR (gst_aja_video_src_get_caps);
     basesrc_class->set_caps = GST_DEBUG_FUNCPTR (gst_aja_video_src_set_caps);
@@ -156,6 +158,18 @@ gst_aja_video_src_class_init (GstAjaVideoSrcClass * klass)
                                                         1, G_MAXINT, DEFAULT_QUEUE_SIZE,
                                                         (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
+  g_object_class_install_property (gobject_class, PROP_OUTPUT_STREAM_TIME,
+                                   g_param_spec_boolean ("output-stream-time", "Output Stream Time",
+                                                         "Output stream time directly instead of translating to pipeline clock",
+                                                         DEFAULT_OUTPUT_STREAM_TIME,
+                                                         (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
+  g_object_class_install_property (gobject_class, PROP_SKIP_FIRST_TIME,
+                                   g_param_spec_uint64 ("skip-first-time", "Skip First Time",
+                                                        "Skip that much time of initial frames after starting", 0,
+                                                        G_MAXUINT64, DEFAULT_SKIP_FIRST_TIME,
+                                                        (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
     templ_caps = gst_aja_mode_get_template_caps_raw ();
     gst_element_class_add_pad_template (element_class, gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS, templ_caps));
     gst_caps_unref (templ_caps);
@@ -174,6 +188,15 @@ gst_aja_video_src_init (GstAjaVideoSrc *src)
     src->input_channel = DEFAULT_INPUT_CHANNEL;
     src->device_number = DEFAULT_DEVICE_NUMBER;
     src->queue_size = DEFAULT_QUEUE_SIZE;
+    src->output_stream_time = DEFAULT_OUTPUT_STREAM_TIME;
+    src->skip_first_time = DEFAULT_SKIP_FIRST_TIME;
+
+    src->window_size = 64;
+    src->times = g_new (GstClockTime, 4 * src->window_size);
+    src->times_temp = src->times + 2 * src->window_size;
+    src->window_fill = 0;
+    src->window_skip = 1;
+    src->window_skip_count = 0;
     
     gst_base_src_set_live (GST_BASE_SRC (src), TRUE);
     gst_base_src_set_format (GST_BASE_SRC (src), GST_FORMAT_TIME);
@@ -207,6 +230,14 @@ gst_aja_video_src_set_property (GObject * object, guint property_id, const GValu
         case PROP_QUEUE_SIZE:
             src->queue_size = g_value_get_uint (value);
             break;
+
+        case PROP_OUTPUT_STREAM_TIME:
+            src->output_stream_time = g_value_get_boolean (value);
+            break;
+
+        case PROP_SKIP_FIRST_TIME:
+            src->skip_first_time = g_value_get_uint64 (value);
+            break;
             
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -237,6 +268,14 @@ gst_aja_video_src_get_property (GObject * object, guint property_id, GValue * va
         case PROP_QUEUE_SIZE:
             g_value_set_uint (value, src->queue_size);
             break;
+
+        case PROP_OUTPUT_STREAM_TIME:
+            g_value_set_boolean (value, src->output_stream_time);
+            break;
+
+        case PROP_SKIP_FIRST_TIME:
+            g_value_set_uint64 (value, src->skip_first_time);
+            break;
             
         default:
             G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -250,8 +289,13 @@ gst_aja_video_src_finalize (GObject * object)
     GstAjaVideoSrc *src = GST_AJA_VIDEO_SRC (object);
     GST_DEBUG_OBJECT (src, "finalize");
 
+    g_free (src->times);
+    src->times = NULL;
     g_mutex_clear (&src->lock);
     g_cond_clear (&src->cond);
+
+    g_queue_foreach (&src->current_frames, (GFunc) aja_capture_video_frame_free, NULL);
+    g_queue_clear (&src->current_frames);
     
     // Call parent class
     G_OBJECT_CLASS (parent_class)->finalize (object);
@@ -325,93 +369,6 @@ gst_aja_video_src_get_caps (GstBaseSrc * bsrc, GstCaps * filter)
     return caps;
 }
 
-void
-gst_aja_video_src_convert_to_external_clock (GstAjaVideoSrc * src, GstClockTime * timestamp, GstClockTime * duration)
-{
-    GstClock *clock;
-    
-    g_assert (timestamp != NULL);
-    
-    if (*timestamp == GST_CLOCK_TIME_NONE)
-        return;
-    
-    clock = gst_element_get_clock (GST_ELEMENT_CAST (src));
-    if (clock && clock != src->input->clock)
-    {
-        GstClockTime internal, external, rate_n, rate_d;
-        GstClockTimeDiff external_start_time_diff;
-        
-        gst_clock_get_calibration (src->input->clock, &internal, &external, &rate_n, &rate_d);
-        
-        if (rate_n != rate_d && src->internal_base_time != GST_CLOCK_TIME_NONE)
-        {
-            GstClockTime internal_timestamp = *timestamp;
-            
-            // Convert to the running time corresponding to both clock times
-            internal -= src->internal_base_time;
-            external -= src->external_base_time;
-            
-            // Get the difference in the internal time, note
-            // that the capture time is internal time.
-            // Then scale this difference and offset it to
-            // our external time. Now we have the running time
-            // according to our external clock.
-            //
-            // For the duration we just scale
-            if (internal > internal_timestamp)
-            {
-                guint64 diff = internal - internal_timestamp;
-                diff = gst_util_uint64_scale (diff, rate_n, rate_d);
-                *timestamp = external - diff;
-            }
-            else
-            {
-                guint64 diff = internal_timestamp - internal;
-                diff = gst_util_uint64_scale (diff, rate_n, rate_d);
-                *timestamp = external + diff;
-            }
-            
-            GST_LOG_OBJECT (src,
-                            "Converted %" GST_TIME_FORMAT " to %" GST_TIME_FORMAT " (external: %"
-                            GST_TIME_FORMAT " internal %" GST_TIME_FORMAT " rate: %lf)",
-                            GST_TIME_ARGS (internal_timestamp), GST_TIME_ARGS (*timestamp),
-                            GST_TIME_ARGS (external), GST_TIME_ARGS (internal),
-                            ((gdouble) rate_n) / ((gdouble) rate_d));
-            
-            if (duration)
-            {
-                GstClockTime internal_duration = *duration;
-                
-                *duration = gst_util_uint64_scale (internal_duration, rate_d, rate_n);
-                
-                GST_LOG_OBJECT (src,
-                                "Converted duration %" GST_TIME_FORMAT " to %" GST_TIME_FORMAT
-                                " (external: %" GST_TIME_FORMAT " internal %" GST_TIME_FORMAT
-                                " rate: %lf)", GST_TIME_ARGS (internal_duration),
-                                GST_TIME_ARGS (*duration), GST_TIME_ARGS (external),
-                                GST_TIME_ARGS (internal), ((gdouble) rate_n) / ((gdouble) rate_d));
-            }
-        }
-        else
-        {
-            GST_LOG_OBJECT (src, "No clock conversion needed, relative rate is 1.0");
-        }
-        
-        // Add the diff between the external time when we
-        // went to playing and the external time when the
-        // pipeline went to playing. Otherwise we will
-        // always start outputting from 0 instead of the
-        // current running time.
-        external_start_time_diff = gst_element_get_base_time (GST_ELEMENT_CAST (src));
-        external_start_time_diff = src->external_base_time - external_start_time_diff;
-        *timestamp += external_start_time_diff;
-    }
-    else
-    {
-        GST_LOG_OBJECT (src, "No clock conversion needed, same clocks");
-    }
-}
-
 static gboolean
 gst_aja_video_src_query (GstBaseSrc * bsrc, GstQuery * query)
 {
@@ -426,18 +383,22 @@ gst_aja_video_src_query (GstBaseSrc * bsrc, GstQuery * query)
         {
             if (src->input)
             {
-                GstClockTime min, max;
-                const GstAjaMode *mode;
-
-                g_mutex_lock (&src->lock);
-                mode = gst_aja_get_mode_raw (src->modeEnum);
-                g_mutex_unlock (&src->lock);
-
-                min = gst_util_uint64_scale_ceil (GST_SECOND, mode->fps_d, mode->fps_n);
-                max = src->queue_size * min;
-
-                gst_query_set_latency (query, TRUE, min, max);
-                ret = TRUE;
+                g_mutex_lock (&src->input->lock);
+                if (src->input->mode)
+                {
+                    GstClockTime min, max;
+                    
+                    min = gst_util_uint64_scale_ceil (GST_SECOND, src->input->mode->fps_d, src->input->mode->fps_n);
+                    max = src->queue_size * min;
+                    
+                    gst_query_set_latency (query, TRUE, min, max);
+                    ret = TRUE;
+                }
+                else
+                {
+                    ret = FALSE;
+                }
+                g_mutex_unlock (&src->input->lock);
             }
             else
             {
@@ -505,10 +466,6 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
 
     g_mutex_lock (&src->input->lock);
     src->input->mode = mode;
-    src->input->clock_start_time = GST_CLOCK_TIME_NONE;
-    src->input->clock_epoch += src->input->clock_last_time;
-    src->input->clock_last_time = 0;
-    src->input->clock_offset = 0;
     src->input->start_streams = gst_aja_video_src_start_streams;
 
     status = src->input->ntv2AVHevc->Open ();
@@ -561,8 +518,6 @@ gst_aja_video_src_close (GstAjaVideoSrc * src)
         src->input->video_enabled = FALSE;
         gst_object_unref (src->input->videosrc);
         src->input->videosrc = NULL;
-        gst_object_unref (src->input->clock);
-        src->input->clock = NULL;
         src->input->start_streams = NULL;
 
         g_mutex_unlock (&src->input->lock);
@@ -604,25 +559,26 @@ gst_aja_video_src_start_streams (GstElement * element)
     {
             GST_DEBUG_OBJECT (src, "Starting streams");
 
+            g_mutex_lock (&src->lock);
+            src->first_time = GST_CLOCK_TIME_NONE;
+            src->window_fill = 0;
+            src->window_filled = FALSE;
+            src->window_skip = 1;
+            src->window_skip_count = 0;
+            src->current_time_mapping.xbase = 0;
+            src->current_time_mapping.b = 0;
+            src->current_time_mapping.num = 1;
+            src->current_time_mapping.den = 1;
+            src->next_time_mapping.xbase = 0;
+            src->next_time_mapping.b = 0;
+            src->next_time_mapping.num = 1;
+            src->next_time_mapping.den = 1;
+            g_mutex_unlock (&src->lock);
+
             if (src->input->ntv2AVHevc)
             {
                 src->input->started = TRUE;
-                src->input->clock_restart = TRUE;
                 src->input->ntv2AVHevc->Run ();
-
-                // Need to unlock to get the clock time
-                g_mutex_unlock (&src->input->lock);
-
-                // Current times of internal and external clock when we go to
-                // playing. We need this to convert the pipeline running time
-                // to the running time of the hardware
-                //
-                // We can't use the normal base time for the external clock
-                // because we might go to PLAYING later than the pipeline
-                src->internal_base_time = gst_clock_get_internal_time (src->input->clock);
-                src->external_base_time = gst_clock_get_internal_time (GST_ELEMENT_CLOCK (src));
-
-                g_mutex_lock (&src->input->lock);
             }
         }
         else
@@ -649,28 +605,13 @@ gst_aja_video_src_change_state (GstElement * element, GstStateChange transition)
             
         case GST_STATE_CHANGE_READY_TO_PAUSED:
             g_mutex_lock (&src->input->lock);
-            src->input->clock_start_time = GST_CLOCK_TIME_NONE;
-            src->input->clock_epoch += src->input->clock_last_time;
-            src->input->clock_last_time = 0;
-            src->input->clock_offset = 0;
             src->input->ntv2AVHevc->SetCallback(VIDEO_CALLBACK, (int64_t)&gst_aja_video_src_video_callback, (int64_t)src);
             g_mutex_unlock (&src->input->lock);
-            gst_element_post_message (element, gst_message_new_clock_provide (GST_OBJECT_CAST (element), src->input->clock, TRUE));
             src->flushing = FALSE;
             break;
             
         case GST_STATE_CHANGE_PAUSED_TO_PLAYING:
         {
-            GstClock *clock;
-            
-            clock = gst_element_get_clock (GST_ELEMENT_CAST (src));
-            if (clock && clock != src->input->clock)
-            {
-                gst_clock_set_master (src->input->clock, clock);
-            }
-            if (clock)
-                gst_object_unref (clock);
-            
             break;
         }
             
@@ -685,17 +626,6 @@ gst_aja_video_src_change_state (GstElement * element, GstStateChange transition)
     switch (transition)
     {
         case GST_STATE_CHANGE_PAUSED_TO_READY:
-            gst_element_post_message (element, gst_message_new_clock_lost (GST_OBJECT_CAST (element), src->input->clock));
-            gst_clock_set_master (src->input->clock, NULL);
-            // Reset calibration to make the clock reusable next time we use it
-            gst_clock_set_calibration (src->input->clock, 0, 0, 1, 1);
-            g_mutex_lock (&src->input->lock);
-            src->input->clock_start_time = GST_CLOCK_TIME_NONE;
-            src->input->clock_epoch += src->input->clock_last_time;
-            src->input->clock_last_time = 0;
-            src->input->clock_offset = 0;
-            g_mutex_unlock (&src->input->lock);
-            
             gst_aja_video_src_stop (src);
             break;
             
@@ -708,14 +638,6 @@ gst_aja_video_src_change_state (GstElement * element, GstStateChange transition)
             src->input->started = FALSE;
             g_mutex_unlock (&src->input->lock);
             
-            //res = src->input->input->StopStreams ();
-            //if (res != S_OK)
-            //{
-            //    GST_ELEMENT_ERROR (src, STREAM, FAILED, (NULL), ("Failed to stop streams: 0x%08x", res));
-            //    ret = GST_STATE_CHANGE_FAILURE;
-            //}
-            src->internal_base_time = GST_CLOCK_TIME_NONE;
-            src->external_base_time = GST_CLOCK_TIME_NONE;
             break;
         }
             
@@ -742,15 +664,181 @@ out:
 }
 
 static void
-gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff, GstAjaModeRawEnum mode, GstClockTime capture_time, GstClockTime capture_duration)
+gst_aja_video_src_update_time_mapping (GstAjaVideoSrc * src,
+    GstClockTime capture_time, GstClockTime stream_time)
 {
+  if (src->window_skip_count == 0) {
+    GstClockTime num, den, b, xbase;
+    gdouble r_squared;
+
+    src->times[2 * src->window_fill] = stream_time;
+    src->times[2 * src->window_fill + 1] = capture_time;
+
+    src->window_fill++;
+    src->window_skip_count++;
+    if (src->window_skip_count >= src->window_skip)
+      src->window_skip_count = 0;
+
+    if (src->window_fill >= src->window_size) {
+      guint fps =
+          ((gdouble) src->info.fps_n + src->info.fps_d -
+          1) / ((gdouble) src->info.fps_d);
+
+      /* Start by updating first every frame, once full every second frame,
+       * etc. until we update once every 4 seconds */
+      if (src->window_skip < 4 * fps)
+        src->window_skip *= 2;
+      if (src->window_skip >= 4 * fps)
+        src->window_skip = 4 * fps;
+
+      src->window_fill = 0;
+      src->window_filled = TRUE;
+    }
+
+    /* First sample ever, create some basic mapping to start */
+    if (!src->window_filled && src->window_fill == 1) {
+      src->current_time_mapping.xbase = stream_time;
+      src->current_time_mapping.b = capture_time;
+      src->current_time_mapping.num = 1;
+      src->current_time_mapping.den = 1;
+      src->next_time_mapping_pending = FALSE;
+    }
+
+    /* Only bother calculating anything here once we had enough measurements,
+     * i.e. let's take the window size as a start */
+    if (src->window_filled &&
+        gst_calculate_linear_regression (src->times, src->times_temp,
+            src->window_size, &num, &den, &b, &xbase, &r_squared)) {
+
+      GST_DEBUG_OBJECT (src,
+          "Calculated new time mapping: pipeline time = %lf * (stream time - %"
+          G_GUINT64_FORMAT ") + %" G_GUINT64_FORMAT " (%lf)",
+          ((gdouble) num) / ((gdouble) den), xbase, b, r_squared);
+
+      src->next_time_mapping.xbase = xbase;
+      src->next_time_mapping.b = b;
+      src->next_time_mapping.num = num;
+      src->next_time_mapping.den = den;
+      src->next_time_mapping_pending = TRUE;
+    }
+  } else {
+    src->window_skip_count++;
+    if (src->window_skip_count >= src->window_skip)
+      src->window_skip_count = 0;
+  }
+
+  if (src->next_time_mapping_pending) {
+    GstClockTime expected, new_calculated, diff, max_diff;
+
+    expected =
+        gst_clock_adjust_with_calibration (NULL, stream_time,
+        src->current_time_mapping.xbase, src->current_time_mapping.b,
+        src->current_time_mapping.num, src->current_time_mapping.den);
+    new_calculated =
+        gst_clock_adjust_with_calibration (NULL, stream_time,
+        src->next_time_mapping.xbase, src->next_time_mapping.b,
+        src->next_time_mapping.num, src->next_time_mapping.den);
+
+    if (new_calculated > expected)
+      diff = new_calculated - expected;
+    else
+      diff = expected - new_calculated;
+
+    /* At most 5% frame duration change per update */
+    max_diff =
+        gst_util_uint64_scale (GST_SECOND / 200, src->info.fps_d,
+        src->info.fps_n);
+
+    GST_DEBUG_OBJECT (src,
+        "New time mapping causes difference of %" GST_TIME_FORMAT,
+        GST_TIME_ARGS (diff));
+    GST_DEBUG_OBJECT (src, "Maximum allowed per frame %" GST_TIME_FORMAT,
+        GST_TIME_ARGS (max_diff));
+
+    if (diff > max_diff) {
+      /* adjust so that we move that much closer */
+      if (new_calculated > expected) {
+        src->current_time_mapping.b = expected + max_diff;
+        src->current_time_mapping.xbase = stream_time;
+      } else {
+        src->current_time_mapping.b = expected - max_diff;
+        src->current_time_mapping.xbase = stream_time;
+      }
+    } else {
+      src->current_time_mapping.xbase = src->next_time_mapping.xbase;
+      src->current_time_mapping.b = src->next_time_mapping.b;
+      src->current_time_mapping.num = src->next_time_mapping.num;
+      src->current_time_mapping.den = src->next_time_mapping.den;
+      src->next_time_mapping_pending = FALSE;
+    }
+  }
+}
+
+static void
+gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
+{
+    GstClock *clock;
+    GstClockTime capture_sys = videoBuff->timeStamp / 10;
+    GstClockTime now_sys, now_pipeline, capture_pipeline;
+    GstClockTime capture_delay = 0, base_time;
+    GstClockTime stream_time, timestamp;
+
+    clock = gst_element_get_clock (GST_ELEMENT_CAST (src));
+
+    // AJA seems to use the real time clock, not the monotonic clock
+    now_sys = g_get_real_time ();
+    now_pipeline = gst_clock_get_time (clock);
+    // We can actually calculate how far in the past the frame was captured
+    if (now_sys >= capture_sys && now_sys - capture_sys < 1000000 /* 1s */) {
+      capture_delay = now_sys - capture_sys;
+    }
+    gst_object_unref (clock);
+
+    if (now_pipeline > capture_delay)
+      capture_pipeline = now_pipeline - capture_delay;
+    else
+      capture_pipeline = 0;
+
+    base_time = gst_element_get_base_time (GST_ELEMENT_CAST (src));
+    if (capture_pipeline > base_time)
+      capture_pipeline -= base_time;
+    else
+      capture_pipeline = 0;
+
+    stream_time = gst_util_uint64_scale (videoBuff->frameNumber, src->input->mode->fps_d * GST_SECOND, src->input->mode->fps_n);
+
     //GST_ERROR_OBJECT (src, "Got video frame at %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_time));
     //GST_ERROR_OBJECT (src, "Got video duration %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_duration));
-    
-    gst_aja_video_src_convert_to_external_clock (src, &capture_time, &capture_duration);
+
+    g_mutex_lock (&src->lock);
+    if (src->first_time == GST_CLOCK_TIME_NONE)
+      src->first_time = stream_time;
+
+    if (src->skip_first_time > 0
+        && stream_time - src->first_time < src->skip_first_time) {
+      g_mutex_unlock (&src->lock);
+      GST_DEBUG_OBJECT (src,
+          "Skipping frame as requested: %" GST_TIME_FORMAT " < %" GST_TIME_FORMAT,
+          GST_TIME_ARGS (stream_time),
+          GST_TIME_ARGS (src->skip_first_time + src->first_time));
+      src->input->ntv2AVHevc->ReleaseVideoBuffer(videoBuff);
+      return;
+    }
+
+    gst_aja_video_src_update_time_mapping (src, capture_pipeline, stream_time);
+
+    if (src->output_stream_time) {
+        timestamp = stream_time;
+    } else {
+        timestamp =
+            gst_clock_adjust_with_calibration (NULL, stream_time,
+            src->current_time_mapping.xbase, src->current_time_mapping.b,
+            src->current_time_mapping.num, src->current_time_mapping.den);
+    }
+
+
     //GST_ERROR_OBJECT (src, "Actual timestamp %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_time));
     
-    g_mutex_lock (&src->lock);
     if (!src->flushing)
     {
         AjaCaptureVideoFrame *f;
@@ -766,9 +854,9 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff, Gst
         f = (AjaCaptureVideoFrame *) g_malloc0 (sizeof (AjaCaptureVideoFrame));
         f->video_src = src;
         f->video_buff = videoBuff;
-        f->capture_time = capture_time;
-        f->capture_duration = capture_duration;
-        f->mode = mode;
+        f->capture_time = timestamp;
+        f->stream_time = stream_time;
+        f->mode = src->modeEnum;
         
         g_queue_push_tail (&src->current_frames, f);
         g_cond_signal (&src->cond);
@@ -781,6 +869,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff, Gst
 static GstFlowReturn
 gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 {
+    static GstStaticCaps stream_reference = GST_STATIC_CAPS ("timestamp/x-aja-stream");
     GstAjaVideoSrc *src = GST_AJA_VIDEO_SRC (bsrc);
     //GST_DEBUG_OBJECT (src, "create");
     
@@ -842,7 +931,13 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     src->input->ntv2AVHevc->AddRefVideoBuffer(vf->video_buff);
     
     GST_BUFFER_TIMESTAMP (*buffer) = f->capture_time;
-    GST_BUFFER_DURATION (*buffer) = f->capture_duration;
+    GST_BUFFER_DURATION (*buffer) = GST_CLOCK_TIME_NONE;
+
+#if GST_CHECK_VERSION (1, 13, 0)
+    gst_buffer_add_reference_timestamp_meta (*buffer,
+        gst_static_caps_get (&stream_reference), f->stream_time,
+        GST_CLOCK_TIME_NONE);
+#endif
     
 #if 1
     GST_DEBUG_OBJECT (src,
@@ -854,33 +949,16 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     return flow_ret;
 }
 
-static GstClock *
-gst_aja_video_src_provide_clock (GstElement * element)
-{
-    GstAjaVideoSrc *src = GST_AJA_VIDEO_SRC (element);
-    
-    if (!src->input->ntv2AVHevc)
-        return NULL;
-    
-    return GST_CLOCK_CAST (gst_object_ref (src->input->clock));
-}
-
 static gboolean
 gst_aja_video_src_video_callback(int64_t refcon, int64_t msg)
 {
     GstAjaVideoSrc *src = (GstAjaVideoSrc *) refcon;
     AjaVideoBuff *videoBuffer = (AjaVideoBuff *) msg;
 
-    // Adjust time stamp based on start time
-    if (src->input->clock_start_time != GST_CLOCK_TIME_NONE)
-    {
-        videoBuffer->timeStamp = videoBuffer->timeStamp-src->input->clock_start_time;
-    }
-
     if (src->input->video_enabled == FALSE)
         return FALSE;
     
-    gst_aja_video_src_got_frame(src, videoBuffer, src->modeEnum, videoBuffer->timeStamp, videoBuffer->timeDuration);
+    gst_aja_video_src_got_frame(src, videoBuffer);
     return TRUE;
 }
 

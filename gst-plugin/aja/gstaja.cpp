@@ -55,15 +55,6 @@ gst_aja_acquire_input (gint deviceNum, gint channel, GstElement * src, gboolean 
     if (input->ntv2AVHevc == NULL) {
       // FIXME: Make this configurable
       input->ntv2AVHevc = new NTV2GstAVHevc("0", (NTV2Channel) channel);
-      if (input->ntv2AVHevc == NULL)
-      {
-          GST_ERROR_OBJECT (src, "Failed to acquire input");
-          g_mutex_unlock (&input->lock);
-          return NULL;
-      }
-      
-      input->clock = gst_aja_clock_new ("GstAjaInputClock");
-      GST_AJA_CLOCK_CAST (input->clock)->input = input;
     }
 
     if (is_audio && !input->audiosrc)
@@ -376,52 +367,7 @@ gst_aja_clock_get_internal_time (GstClock * clock)
     uint64_t time;
     bool status;
     
-    if (self->input != NULL)
-    {
-        g_mutex_lock (&self->input->lock);
-        start_time = self->input->clock_start_time;
-        offset = self->input->clock_offset;
-        last_time = self->input->clock_last_time;
-        time = -1;
-        if (!self->input->started)
-        {
-            result = last_time;
-        }
-        else
-        {
-            status = self->input->ntv2AVHevc->GetHardwareClock(GST_SECOND, &time);
-            if (status)
-            {
-                result = time;
-                if (start_time == GST_CLOCK_TIME_NONE)
-                    start_time = self->input->clock_start_time = result;
-                
-                if (result > start_time)
-                    result -= start_time;
-                else
-                    result = 0;
-                
-                if (self->input->clock_restart)
-                {
-                    self->input->clock_offset = result - last_time;
-                    offset = self->input->clock_offset;
-                    self->input->clock_restart = FALSE;
-                }
-                result = MAX (last_time, result);
-                result -= offset;
-                result = MAX (last_time, result);
-            }
-            else
-            {
-                result = last_time;
-            }
-            //printf("time diff %ld\n", (result-self->input->clock_last_time)/1000);
-            self->input->clock_last_time = result;
-        }
-        result += self->input->clock_epoch;
-        g_mutex_unlock (&self->input->lock);
-    }
-    else if (self->output != NULL)
+    if (self->output != NULL)
     {
         g_mutex_lock (&self->output->lock);
         start_time = self->output->clock_start_time;
@@ -434,7 +380,7 @@ gst_aja_clock_get_internal_time (GstClock * clock)
         }
         else
         {
-            status = self->input->ntv2AVHevc->GetHardwareClock(GST_SECOND, &time);
+            status = self->output->ntv2AVHevc->GetHardwareClock(GST_SECOND, &time);
             if (status)
             {
                 result = time;

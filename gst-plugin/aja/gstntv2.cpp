@@ -948,6 +948,7 @@ void NTV2GstAVHevc::ACInputWorker (void)
             AjaVideoBuff *	pVideoData	(mACInputCircularBuffer.StartProduceNextBuffer ());
             if (pVideoData)
             {
+                // TODO: Use a GstBufferPool for audio/video here instead
                 // setup buffer pointers for transfer
                 mInputTransferStruct.SetVideoBuffer(pVideoData->pVideoBuffer, pVideoData->videoBufferSize);
                 mInputTransferStruct.SetAudioBuffer(NULL, 0);
@@ -969,6 +970,14 @@ void NTV2GstAVHevc::ACInputWorker (void)
                 // get the audio data size
                 pAudioData->audioDataSize = mInputTransferStruct.acTransferStatus.acAudioTransferSize;
                 pAudioData->lastFrame = mLastFrame;
+
+                // FIXME: this should actually use acAudioClockTimeStamp but
+                // it does not actually seem to be based on a 48kHz clock
+                pVideoData->timeStamp = mInputTransferStruct.acTransferStatus.acFrameStamp.acFrameTime;
+                pAudioData->timeStamp = mInputTransferStruct.acTransferStatus.acFrameStamp.acFrameTime;
+
+                pVideoData->frameNumber = mVideoInputFrameCount;
+                pAudioData->frameNumber = mVideoInputFrameCount;
 
                 if (mWithAnc)
                 {
@@ -1084,22 +1093,18 @@ void NTV2GstAVHevc::VideoOutputWorker (void)
                 if (pDstFrame)
                 {
                     memcpy(pDstFrame->pVideoBuffer, pFrameData->pVideoBuffer, pFrameData->videoDataSize);
-                    pDstFrame->frameNumber = mVideoOutFrameCount;
+                    pDstFrame->frameNumber = pFrameData->frameNumber;
                     pDstFrame->videoDataSize = pFrameData->videoDataSize;
                     pDstFrame->timeCodeDBB = pFrameData->timeCodeDBB;
                     pDstFrame->timeCodeLow = pFrameData->timeCodeLow;
                     pDstFrame->timeCodeHigh = pFrameData->timeCodeHigh;
+                    pDstFrame->timeStamp = pFrameData->timeStamp;
                     pDstFrame->lastFrame = pFrameData->lastFrame;
                     if (mWithInfo)
                     {
                         memcpy(pDstFrame->pInfoBuffer, pFrameData->pInfoBuffer, pFrameData->infoDataSize);
                         pDstFrame->infoDataSize = pFrameData->infoDataSize;
                     }
-
-                    // The time duration is based off the frame rate and for now we will pass the absolute
-                    // time which will be adjusted by the start time in the layer above.
-                    pDstFrame->timeDuration = (uint64_t)mTimeBase.FramesToMicroseconds(1)*1000;
-                    GetHardwareClock(ASECOND, &pDstFrame->timeStamp);
 
                     // Possible callbacks are not setup yet so make sure we release the buffer if
                     // no one is there to catch them
@@ -1317,22 +1322,18 @@ void NTV2GstAVHevc::HevcOutputWorker (void)
                 if (pDstFrame)
                 {
                     memcpy(pDstFrame->pVideoBuffer, pFrameData->pVideoBuffer, pFrameData->videoDataSize);
-                    pDstFrame->frameNumber = mHevcOutFrameCount;
+                    pDstFrame->frameNumber = pFrameData->frameNumber;
                     pDstFrame->videoDataSize = pFrameData->videoDataSize;
                     pDstFrame->timeCodeDBB = pFrameData->timeCodeDBB;
                     pDstFrame->timeCodeLow = pFrameData->timeCodeLow;
                     pDstFrame->timeCodeHigh = pFrameData->timeCodeHigh;
+                    pDstFrame->timeStamp = pFrameData->timeStamp;
                     pDstFrame->lastFrame = pFrameData->lastFrame;
                     if (mWithInfo)
                     {
                         memcpy(pDstFrame->pInfoBuffer, pFrameData->pInfoBuffer, pFrameData->infoDataSize);
                         pDstFrame->infoDataSize = pFrameData->infoDataSize;
                     }
-
-                    // The time duration is based off the frame rate and for now we will pass the absolute
-                    // time which will be adjusted by the start time in the layer above.
-                    pDstFrame->timeDuration = (uint64_t)mTimeBase.FramesToMicroseconds(1)*1000;
-                    GetHardwareClock(ASECOND, &pDstFrame->timeStamp);
 
                     // Possible callbacks are not setup yet so make sure we release the buffer if
                     // no one is there to catch them
@@ -1394,27 +1395,19 @@ void NTV2GstAVHevc::AudioOutputWorker (void)
     while (!mGlobalQuit)
     {
         // wait for the next codec hevc frame
-        printf("waiting audio\n");
         AjaAudioBuff *	pFrameData (mAudioInputCircularBuffer.StartConsumeNextBuffer ());
-        printf("waited audio\n");
         if (pFrameData)
         {
-            printf("have audio\n");
             if (!mLastFrameAudioOut)
             {
                 AjaAudioBuff * pDstFrame = AcquireAudioBuffer();
                 if (pDstFrame)
                 {
-                    printf("have audio output %lu %lu\n", pFrameData->audioDataSize, pFrameData->timeStamp);
                     memcpy(pDstFrame->pAudioBuffer, pFrameData->pAudioBuffer, pFrameData->audioDataSize);
                     pDstFrame->audioDataSize = pFrameData->audioDataSize;
+                    pDstFrame->frameNumber = pFrameData->frameNumber;
                     pDstFrame->timeStamp = pFrameData->timeStamp;
                     pDstFrame->lastFrame = pFrameData->lastFrame;
-
-                    // The time duration is based off the frame rate and for now we will pass the absolute
-                    // time which will be adjusted by the start time in the layer above.
-                    pDstFrame->timeDuration = (uint64_t)mTimeBase.FramesToMicroseconds(1)*1000;
-                    GetHardwareClock(ASECOND, &pDstFrame->timeStamp);
 
                     // Possible callbacks are not setup yet so make sure we release the buffer if
                     // no one is there to catch them
