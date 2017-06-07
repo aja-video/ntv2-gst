@@ -303,6 +303,7 @@ void NTV2GstAVHevc::Quit (void)
     StopCodecRawThread();
     StopCodecHevcThread();
     StopAudioOutputThread();
+    FreeHostBuffers();
 
     //  Stop video capture
     mDevice.SetMode(mInputChannel, NTV2_MODE_DISPLAY, false);
