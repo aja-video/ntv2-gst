@@ -956,10 +956,13 @@ void NTV2GstAVHevc::ACInputWorker (void)
 
                 if (mWithAnc)
                 {
-                    // get the sdi input anc data
-                    pVideoData->timeCodeDBB = mInputTransferStruct.acTransferStatus.acFrameStamp.acRP188.fDBB;
-                    pVideoData->timeCodeLow = mInputTransferStruct.acTransferStatus.acFrameStamp.acRP188.fLo;
-                    pVideoData->timeCodeHigh = mInputTransferStruct.acTransferStatus.acFrameStamp.acRP188.fHi;
+                    NTV2_RP188 timeCode;
+                    if (mInputTransferStruct.acTransferStatus.acFrameStamp.GetInputTimeCode(timeCode)) {
+                      // get the sdi input anc data
+                      pVideoData->timeCodeDBB = timeCode.fDBB;
+                      pVideoData->timeCodeLow = timeCode.fLo;
+                      pVideoData->timeCodeHigh = timeCode.fHi;
+                    }
                 }
 
                 if (mWithInfo)
