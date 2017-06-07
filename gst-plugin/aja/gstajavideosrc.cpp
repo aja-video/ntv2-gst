@@ -551,6 +551,7 @@ gst_aja_video_src_close (GstAjaVideoSrc * src)
         if (src->input->ntv2AVHevc)
         {
             src->input->ntv2AVHevc->Quit ();
+            src->input->ntv2AVHevc->Close ();
             delete src->input->ntv2AVHevc;
             src->input->ntv2AVHevc = NULL;
             GST_DEBUG_OBJECT (src, "shut down ntv2HEVC");
