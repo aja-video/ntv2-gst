@@ -15,7 +15,7 @@
 #define NTV2_AUDIOSIZE_MAX		(401 * 1024)
 
 
-NTV2GstAVHevc::NTV2GstAVHevc (const string inDeviceSpecifier, const NTV2Channel inChannel)
+NTV2GstAV::NTV2GstAV (const string inDeviceSpecifier, const NTV2Channel inChannel)
 
 :	mACInputThread          (NULL),
 	mVideoOutputThread		(NULL),
@@ -61,7 +61,7 @@ NTV2GstAVHevc::NTV2GstAVHevc (const string inDeviceSpecifier, const NTV2Channel 
 }	//	constructor
 
 
-NTV2GstAVHevc::~NTV2GstAVHevc ()
+NTV2GstAV::~NTV2GstAV ()
 {
 	//	Stop my capture and consumer threads, then destroy them...
 	Quit ();
@@ -84,7 +84,7 @@ NTV2GstAVHevc::~NTV2GstAVHevc ()
 } // destructor
 
 
-AJAStatus NTV2GstAVHevc::Open (void)
+AJAStatus NTV2GstAV::Open (void)
 {
     if (mDeviceID != DEVICE_ID_NOTFOUND)
         return AJA_STATUS_SUCCESS;
@@ -103,7 +103,7 @@ AJAStatus NTV2GstAVHevc::Open (void)
 }
 
 
-AJAStatus NTV2GstAVHevc::Close (void)
+AJAStatus NTV2GstAV::Close (void)
 {
     AJAStatus	status	(AJA_STATUS_SUCCESS);
 
@@ -113,7 +113,7 @@ AJAStatus NTV2GstAVHevc::Close (void)
 }
 
 
-AJAStatus NTV2GstAVHevc::Init (const M31VideoPreset         inPreset,
+AJAStatus NTV2GstAV::Init (const M31VideoPreset         inPreset,
                                const NTV2VideoFormat        inVideoFormat,
                                const uint32_t               inBitDepth,
                                const bool                   inIs422,
@@ -225,7 +225,7 @@ AJAStatus NTV2GstAVHevc::Init (const M31VideoPreset         inPreset,
     return AJA_STATUS_SUCCESS;
 }
 
-AJAStatus NTV2GstAVHevc::InitAudio (uint32_t *numAudioChannels)
+AJAStatus NTV2GstAV::InitAudio (uint32_t *numAudioChannels)
 {
     AJAStatus	status	(AJA_STATUS_SUCCESS);
 
@@ -246,7 +246,7 @@ AJAStatus NTV2GstAVHevc::InitAudio (uint32_t *numAudioChannels)
     return status;
 }
 
-void NTV2GstAVHevc::Quit (void)
+void NTV2GstAV::Quit (void)
 {
     if (!mLastFrame && !mGlobalQuit)
 	{
@@ -310,7 +310,7 @@ void NTV2GstAVHevc::Quit (void)
 }
 
 
-AJAStatus NTV2GstAVHevc::SetupHEVC (void)
+AJAStatus NTV2GstAV::SetupHEVC (void)
 {
     HevcMainState   mainState;
     HevcEncodeMode  encodeMode;
@@ -474,7 +474,7 @@ AJAStatus NTV2GstAVHevc::SetupHEVC (void)
 }
     
     
-AJAStatus NTV2GstAVHevc::SetupVideo (void)
+AJAStatus NTV2GstAV::SetupVideo (void)
 {
 	//	Setup frame buffer
 	if (mQuad)
@@ -603,7 +603,7 @@ AJAStatus NTV2GstAVHevc::SetupVideo (void)
 }	//	SetupVideo
 
 
-AJAStatus NTV2GstAVHevc::SetupAudio (void)
+AJAStatus NTV2GstAV::SetupAudio (void)
 {
 	ULWord numAudio = ::NTV2DeviceGetNumAudioSystems(mDeviceID);
 	
@@ -633,7 +633,7 @@ AJAStatus NTV2GstAVHevc::SetupAudio (void)
 }	//	SetupAudio
 
 
-void NTV2GstAVHevc::SetupHostBuffers (void)
+void NTV2GstAV::SetupHostBuffers (void)
 {
 	mVideoBufferSize = GetVideoActiveSize (mVideoFormat, mPixelFormat, NTV2_VANCMODE_OFF);
     mPicInfoBufferSize = sizeof(HevcPictureInfo)*2;
@@ -711,7 +711,7 @@ void NTV2GstAVHevc::SetupHostBuffers (void)
 }	//	SetupHostBuffers
 
 
-void NTV2GstAVHevc::FreeHostBuffers (void)
+void NTV2GstAV::FreeHostBuffers (void)
 {
     for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++)
     {
@@ -778,7 +778,7 @@ void NTV2GstAVHevc::FreeHostBuffers (void)
 }
 
 
-void NTV2GstAVHevc::RouteInputSignal (void)
+void NTV2GstAV::RouteInputSignal (void)
 {
     // setup sdi io
 	mDevice.SetSDITransmitEnable (NTV2_CHANNEL1, false);
@@ -834,7 +834,7 @@ void NTV2GstAVHevc::RouteInputSignal (void)
 }
 
 
-void NTV2GstAVHevc::SetupAutoCirculate (void)
+void NTV2GstAV::SetupAutoCirculate (void)
 {
 	//	Tell capture AutoCirculate to use 8 frame buffers on the device...
     mInputTransferStruct.Clear();
@@ -847,7 +847,7 @@ void NTV2GstAVHevc::SetupAutoCirculate (void)
 }
 
 
-AJAStatus NTV2GstAVHevc::Run ()
+AJAStatus NTV2GstAV::Run ()
 {
     mVideoInputFrameCount = 0;
     mVideoOutFrameCount = 0;
@@ -896,7 +896,7 @@ AJAStatus NTV2GstAVHevc::Run ()
 
 
 // This is where we will start the AC thread
-void NTV2GstAVHevc::StartACThread (void)
+void NTV2GstAV::StartACThread (void)
 {
     mACInputThread = new AJAThread ();
     mACInputThread->Attach (ACInputThreadStatic, this);
@@ -906,7 +906,7 @@ void NTV2GstAVHevc::StartACThread (void)
 
 
 // This is where we will stop the AC thread
-void NTV2GstAVHevc::StopACThread (void)
+void NTV2GstAV::StopACThread (void)
 {
     if (mACInputThread)
     {
@@ -920,16 +920,16 @@ void NTV2GstAVHevc::StopACThread (void)
 
 
 // The video input thread static callback
-void NTV2GstAVHevc::ACInputThreadStatic (AJAThread * pThread, void * pContext)
+void NTV2GstAV::ACInputThreadStatic (AJAThread * pThread, void * pContext)
 {
 	(void) pThread;
 
-	NTV2GstAVHevc *	pApp (reinterpret_cast <NTV2GstAVHevc *> (pContext));
+	NTV2GstAV *	pApp (reinterpret_cast <NTV2GstAV *> (pContext));
     pApp->ACInputWorker ();
 }
 
 
-void NTV2GstAVHevc::ACInputWorker (void)
+void NTV2GstAV::ACInputWorker (void)
 {
 	// start AutoCirculate running...
 	mDevice.AutoCirculateStart (mInputChannel);
@@ -1047,7 +1047,7 @@ void NTV2GstAVHevc::ACInputWorker (void)
 
 
 // This is where we start the video output thread
-void NTV2GstAVHevc::StartVideoOutputThread (void)
+void NTV2GstAV::StartVideoOutputThread (void)
 {
     mVideoOutputThread = new AJAThread ();
     mVideoOutputThread->Attach (VideoOutputThreadStatic, this);
@@ -1056,7 +1056,7 @@ void NTV2GstAVHevc::StartVideoOutputThread (void)
 }
 
 // This is where we stop the video output thread
-void NTV2GstAVHevc::StopVideoOutputThread (void)
+void NTV2GstAV::StopVideoOutputThread (void)
 {
     if (mVideoOutputThread)
     {
@@ -1070,16 +1070,16 @@ void NTV2GstAVHevc::StopVideoOutputThread (void)
 
 
 // The video output static callback
-void NTV2GstAVHevc::VideoOutputThreadStatic (AJAThread * pThread, void * pContext)
+void NTV2GstAV::VideoOutputThreadStatic (AJAThread * pThread, void * pContext)
 {
 	(void) pThread;
 
-	NTV2GstAVHevc *	pApp (reinterpret_cast <NTV2GstAVHevc *> (pContext));
+	NTV2GstAV *	pApp (reinterpret_cast <NTV2GstAV *> (pContext));
     pApp->VideoOutputWorker ();
 }
 
 
-void NTV2GstAVHevc::VideoOutputWorker (void)
+void NTV2GstAV::VideoOutputWorker (void)
 {
 	while (!mGlobalQuit)
 	{
@@ -1130,7 +1130,7 @@ void NTV2GstAVHevc::VideoOutputWorker (void)
 
 
 // This is where we start the codec raw thread
-void NTV2GstAVHevc::StartCodecRawThread (void)
+void NTV2GstAV::StartCodecRawThread (void)
 {
     mCodecRawThread = new AJAThread ();
     mCodecRawThread->Attach (CodecRawThreadStatic, this);
@@ -1140,7 +1140,7 @@ void NTV2GstAVHevc::StartCodecRawThread (void)
 
 
 // This is where we stop the codec raw thread
-void NTV2GstAVHevc::StopCodecRawThread (void)
+void NTV2GstAV::StopCodecRawThread (void)
 {
     if (mCodecRawThread)
     {
@@ -1154,16 +1154,16 @@ void NTV2GstAVHevc::StopCodecRawThread (void)
 
 
 // The codec raw static callback
-void NTV2GstAVHevc::CodecRawThreadStatic (AJAThread * pThread, void * pContext)
+void NTV2GstAV::CodecRawThreadStatic (AJAThread * pThread, void * pContext)
 {
 	(void) pThread;
 
-	NTV2GstAVHevc *	pApp (reinterpret_cast <NTV2GstAVHevc *> (pContext));
+	NTV2GstAV *	pApp (reinterpret_cast <NTV2GstAV *> (pContext));
     pApp->CodecRawWorker ();
 }
 
 
-void NTV2GstAVHevc::CodecRawWorker (void)
+void NTV2GstAV::CodecRawWorker (void)
 {
 	while (!mGlobalQuit)
 	{
@@ -1206,7 +1206,7 @@ void NTV2GstAVHevc::CodecRawWorker (void)
 
 
 // This is where we will start the codec hevc thread
-void NTV2GstAVHevc::StartCodecHevcThread (void)
+void NTV2GstAV::StartCodecHevcThread (void)
 {
     mCodecHevcThread = new AJAThread ();
     mCodecHevcThread->Attach (CodecHevcThreadStatic, this);
@@ -1215,7 +1215,7 @@ void NTV2GstAVHevc::StartCodecHevcThread (void)
 }
 
 // This is where we will stop the codec hevc thread
-void NTV2GstAVHevc::StopCodecHevcThread (void)
+void NTV2GstAV::StopCodecHevcThread (void)
 {
     if (mCodecHevcThread)
     {
@@ -1229,16 +1229,16 @@ void NTV2GstAVHevc::StopCodecHevcThread (void)
 
 
 // The codec hevc static callback
-void NTV2GstAVHevc::CodecHevcThreadStatic (AJAThread * pThread, void * pContext)
+void NTV2GstAV::CodecHevcThreadStatic (AJAThread * pThread, void * pContext)
 {
     (void) pThread;
 
-    NTV2GstAVHevc *	pApp (reinterpret_cast <NTV2GstAVHevc *> (pContext));
+    NTV2GstAV *	pApp (reinterpret_cast <NTV2GstAV *> (pContext));
     pApp->CodecHevcWorker ();
 }
 
 
-void NTV2GstAVHevc::CodecHevcWorker (void)
+void NTV2GstAV::CodecHevcWorker (void)
 {
     while (!mGlobalQuit)
     {
@@ -1274,7 +1274,7 @@ void NTV2GstAVHevc::CodecHevcWorker (void)
 
 
 // This is where we start the Hevc output thread
-void NTV2GstAVHevc::StartHevcOutputThread (void)
+void NTV2GstAV::StartHevcOutputThread (void)
 {
     mHevcOutputThread = new AJAThread ();
     mHevcOutputThread->Attach (HevcOutputThreadStatic, this);
@@ -1284,7 +1284,7 @@ void NTV2GstAVHevc::StartHevcOutputThread (void)
 
 
 // This is where we stop the Hevc output thread
-void NTV2GstAVHevc::StopHevcOutputThread (void)
+void NTV2GstAV::StopHevcOutputThread (void)
 {
     if (mHevcOutputThread)
     {
@@ -1298,17 +1298,17 @@ void NTV2GstAVHevc::StopHevcOutputThread (void)
 
 
 // The Hevc output static callback
-void NTV2GstAVHevc::HevcOutputThreadStatic (AJAThread * pThread, void * pContext)
+void NTV2GstAV::HevcOutputThreadStatic (AJAThread * pThread, void * pContext)
 {
     (void) pThread;
 
-    NTV2GstAVHevc *	pApp (reinterpret_cast <NTV2GstAVHevc *> (pContext));
+    NTV2GstAV *	pApp (reinterpret_cast <NTV2GstAV *> (pContext));
     pApp->HevcOutputWorker ();
 
 } // HevcOutputThreadStatic
 
 
-void NTV2GstAVHevc::HevcOutputWorker (void)
+void NTV2GstAV::HevcOutputWorker (void)
 {
     while (!mGlobalQuit)
     {
@@ -1357,7 +1357,7 @@ void NTV2GstAVHevc::HevcOutputWorker (void)
 
 
 // This is where we start the audio output thread
-void NTV2GstAVHevc::StartAudioOutputThread (void)
+void NTV2GstAV::StartAudioOutputThread (void)
 {
     mAudioOutputThread = new AJAThread ();
     mAudioOutputThread->Attach (AudioOutputThreadStatic, this);
@@ -1367,7 +1367,7 @@ void NTV2GstAVHevc::StartAudioOutputThread (void)
 
 
 // This is where we stop the audio output thread
-void NTV2GstAVHevc::StopAudioOutputThread (void)
+void NTV2GstAV::StopAudioOutputThread (void)
 {
     if (mAudioOutputThread)
     {
@@ -1381,16 +1381,16 @@ void NTV2GstAVHevc::StopAudioOutputThread (void)
 
 
 // The audio output static callback
-void NTV2GstAVHevc::AudioOutputThreadStatic (AJAThread * pThread, void * pContext)
+void NTV2GstAV::AudioOutputThreadStatic (AJAThread * pThread, void * pContext)
 {
     (void) pThread;
 
-    NTV2GstAVHevc *	pApp (reinterpret_cast <NTV2GstAVHevc *> (pContext));
+    NTV2GstAV *	pApp (reinterpret_cast <NTV2GstAV *> (pContext));
     pApp->AudioOutputWorker ();
 }
 
 
-void NTV2GstAVHevc::AudioOutputWorker (void)
+void NTV2GstAV::AudioOutputWorker (void)
 {
     while (!mGlobalQuit)
     {
@@ -1431,7 +1431,7 @@ void NTV2GstAVHevc::AudioOutputWorker (void)
 }
 
 
-void NTV2GstAVHevc::SetCallback(CallBackType cbType, NTV2Callback callback, void * callbackRefcon)
+void NTV2GstAV::SetCallback(CallBackType cbType, NTV2Callback callback, void * callbackRefcon)
 {
     if (cbType == VIDEO_CALLBACK)
     {
@@ -1446,7 +1446,7 @@ void NTV2GstAVHevc::SetCallback(CallBackType cbType, NTV2Callback callback, void
 }
 
 
-AjaVideoBuff* NTV2GstAVHevc::AcquireVideoBuffer()
+AjaVideoBuff* NTV2GstAV::AcquireVideoBuffer()
 {
     AJAAutoLock	autoLock (mLock);
     
@@ -1465,7 +1465,7 @@ AjaVideoBuff* NTV2GstAVHevc::AcquireVideoBuffer()
 }
 
 
-AjaAudioBuff* NTV2GstAVHevc::AcquireAudioBuffer()
+AjaAudioBuff* NTV2GstAV::AcquireAudioBuffer()
 {
     AJAAutoLock	autoLock (mLock);
 
@@ -1484,7 +1484,7 @@ AjaAudioBuff* NTV2GstAVHevc::AcquireAudioBuffer()
 }
 
 
-void NTV2GstAVHevc::ReleaseVideoBuffer(AjaVideoBuff * videoBuffer)
+void NTV2GstAV::ReleaseVideoBuffer(AjaVideoBuff * videoBuffer)
 {
     AJAAutoLock	autoLock (mLock);
 
@@ -1496,7 +1496,7 @@ void NTV2GstAVHevc::ReleaseVideoBuffer(AjaVideoBuff * videoBuffer)
 }
 
 
-void NTV2GstAVHevc::ReleaseAudioBuffer(AjaAudioBuff * audioBuffer)
+void NTV2GstAV::ReleaseAudioBuffer(AjaAudioBuff * audioBuffer)
 {
     AJAAutoLock	autoLock (mLock);
 
@@ -1508,7 +1508,7 @@ void NTV2GstAVHevc::ReleaseAudioBuffer(AjaAudioBuff * audioBuffer)
 }
 
 
-void NTV2GstAVHevc::AddRefVideoBuffer(AjaVideoBuff * videoBuffer)
+void NTV2GstAV::AddRefVideoBuffer(AjaVideoBuff * videoBuffer)
 {
     AJAAutoLock	autoLock (mLock);
     videoBuffer->bufferRef++;
@@ -1516,7 +1516,7 @@ void NTV2GstAVHevc::AddRefVideoBuffer(AjaVideoBuff * videoBuffer)
 }
 
 
-void NTV2GstAVHevc::AddRefAudioBuffer(AjaAudioBuff * audioBuffer)
+void NTV2GstAV::AddRefAudioBuffer(AjaAudioBuff * audioBuffer)
 {
     AJAAutoLock	autoLock (mLock);
     audioBuffer->bufferRef++;
@@ -1524,7 +1524,7 @@ void NTV2GstAVHevc::AddRefAudioBuffer(AjaAudioBuff * audioBuffer)
 }
 
 
-bool NTV2GstAVHevc::GetHardwareClock(uint64_t desiredTimeScale, uint64_t * time)
+bool NTV2GstAV::GetHardwareClock(uint64_t desiredTimeScale, uint64_t * time)
 {
     uint32_t    audioCounter(0);
 
@@ -1534,7 +1534,7 @@ bool NTV2GstAVHevc::GetHardwareClock(uint64_t desiredTimeScale, uint64_t * time)
 }
 
 
-AJAStatus NTV2GstAVHevc::DetermineInputFormat(NTV2Channel inputChannel, bool quad, NTV2VideoFormat& videoFormat)
+AJAStatus NTV2GstAV::DetermineInputFormat(NTV2Channel inputChannel, bool quad, NTV2VideoFormat& videoFormat)
 {
     NTV2VideoFormat sdiFormat = mDevice.GetSDIInputVideoFormat (inputChannel);
     if (sdiFormat == NTV2_FORMAT_UNKNOWN)
@@ -1566,7 +1566,7 @@ AJAStatus NTV2GstAVHevc::DetermineInputFormat(NTV2Channel inputChannel, bool qua
 }
 
 
-AJA_FrameRate NTV2GstAVHevc::GetAJAFrameRate(NTV2FrameRate frameRate)
+AJA_FrameRate NTV2GstAV::GetAJAFrameRate(NTV2FrameRate frameRate)
 {
    switch (frameRate)
    {
@@ -1587,7 +1587,7 @@ AJA_FrameRate NTV2GstAVHevc::GetAJAFrameRate(NTV2FrameRate frameRate)
 }
 
 
-bool NTV2GstAVHevc::DoCallback(CallBackType type, void * msg)
+bool NTV2GstAV::DoCallback(CallBackType type, void * msg)
 {
     if (type == VIDEO_CALLBACK)
     {

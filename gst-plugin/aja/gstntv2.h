@@ -75,7 +75,7 @@ typedef struct
 			an AJA device.
 **/
 
-class NTV2GstAVHevc
+class NTV2GstAV
 {
 	//	Public Instance Methods
 	public:
@@ -99,10 +99,10 @@ class NTV2GstAVHevc
             @param[in]	inInfoData          Use picture and encoded information.
                                             Defaults to no info data.
         **/
-		NTV2GstAVHevc(const std::string			inDeviceSpecifier	= "0",
+		NTV2GstAV(const std::string			inDeviceSpecifier	= "0",
                       const NTV2Channel			inChannel			= NTV2_CHANNEL1);
 
-        virtual     ~NTV2GstAVHevc ();
+        virtual     ~NTV2GstAV ();
     
         /**
          @brief	Open/Close, discover and allocate/release an NTV2 device.

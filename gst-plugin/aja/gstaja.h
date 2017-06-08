@@ -158,7 +158,7 @@ GstCaps * gst_aja_mode_get_template_caps_raw (void);
 typedef struct _GstAjaOutput GstAjaOutput;
 struct _GstAjaOutput
 {
-    NTV2GstAVHevc       *ntv2AVHevc;
+    NTV2GstAV       *ntv2AVHevc;
     NTV2EngineState     ntv2EngineState;
     const GstAjaMode    *mode;
     
@@ -180,7 +180,7 @@ struct _GstAjaOutput
 typedef struct _GstAjaInput GstAjaInput;
 struct _GstAjaInput
 {
-    NTV2GstAVHevc       *ntv2AVHevc;
+    NTV2GstAV       *ntv2AVHevc;
     NTV2EngineState     ntv2EngineState;
     const GstAjaMode    *mode;
 

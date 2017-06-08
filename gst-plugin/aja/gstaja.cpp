@@ -54,7 +54,7 @@ gst_aja_acquire_input (gint deviceNum, gint channel, GstElement * src, gboolean 
 
     if (input->ntv2AVHevc == NULL) {
       // FIXME: Make this configurable
-      input->ntv2AVHevc = new NTV2GstAVHevc("0", (NTV2Channel) channel);
+      input->ntv2AVHevc = new NTV2GstAV("0", (NTV2Channel) channel);
     }
 
     if (is_audio && !input->audiosrc)
