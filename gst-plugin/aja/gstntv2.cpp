@@ -1,7 +1,7 @@
 /**
-	@file		ntv2encodehevc.cpp
-	@brief		Implementation of NTV2EncodeHEVC class.
-	@copyright	Copyright (C) 2015 AJA Video Systems, Inc.  All rights reserved.
+    @file        ntv2encodehevc.cpp
+    @brief        Implementation of NTV2EncodeHEVC class.
+    @copyright    Copyright (C) 2015 AJA Video Systems, Inc.  All rights reserved.
 **/
 
 #include <stdio.h>
@@ -12,68 +12,68 @@
 #include "ajabase/system/process.h"
 #include "ajabase/system/systemtime.h"
 
-#define NTV2_AUDIOSIZE_MAX		(401 * 1024)
+#define NTV2_AUDIOSIZE_MAX        (401 * 1024)
 
 
 NTV2GstAV::NTV2GstAV (const string inDeviceSpecifier, const NTV2Channel inChannel)
 
-:	mACInputThread          (NULL),
-	mVideoOutputThread		(NULL),
-	mCodecRawThread			(NULL),
-	mCodecHevcThread		(NULL),
-    mHevcOutputThread 		(NULL),
-    mAudioOutputThread 		(NULL),
-    mM31					(NULL),
+:    mACInputThread          (NULL),
+    mVideoOutputThread        (NULL),
+    mCodecRawThread            (NULL),
+    mCodecHevcThread        (NULL),
+    mHevcOutputThread         (NULL),
+    mAudioOutputThread         (NULL),
+    mM31                    (NULL),
     mLock                   (new AJALock),
-	mDeviceID				(DEVICE_ID_NOTFOUND),
-    mDeviceSpecifier		(inDeviceSpecifier),
-    mInputChannel			(inChannel),
+    mDeviceID                (DEVICE_ID_NOTFOUND),
+    mDeviceSpecifier        (inDeviceSpecifier),
+    mInputChannel            (inChannel),
     mEncodeChannel          (M31_CH0),
-	mInputSource			(NTV2_INPUTSOURCE_SDI1),
-    mVideoFormat			(NTV2_MAX_NUM_VIDEO_FORMATS),
-    mMultiStream			(false),
-	mAudioSystem			(NTV2_AUDIOSYSTEM_1),
+    mInputSource            (NTV2_INPUTSOURCE_SDI1),
+    mVideoFormat            (NTV2_MAX_NUM_VIDEO_FORMATS),
+    mMultiStream            (false),
+    mAudioSystem            (NTV2_AUDIOSYSTEM_1),
         mNumAudioChannels               (0),
-	mLastFrame				(false),
-	mLastFrameInput			(false),
-	mLastFrameVideoOut      (false),
-	mLastFrameHevc			(false),
+    mLastFrame                (false),
+    mLastFrameInput            (false),
+    mLastFrameVideoOut      (false),
+    mLastFrameHevc            (false),
     mLastFrameHevcOut       (false),
     mLastFrameAudioOut      (false),
-    mGlobalQuit				(false),
+    mGlobalQuit                (false),
     mStarted                (false),
     mVideoCallback          (0),
     mVideoCallbackRefcon    (0),
     mAudioCallback          (0),
     mAudioCallbackRefcon    (0),
-	mVideoInputFrameCount	(0),		
-	mVideoOutFrameCount     (0),
-	mCodecRawFrameCount		(0),
-	mCodecHevcFrameCount	(0),
+    mVideoInputFrameCount    (0),        
+    mVideoOutFrameCount     (0),
+    mCodecRawFrameCount        (0),
+    mCodecHevcFrameCount    (0),
     mHevcOutFrameCount      (0),
-    mAudioOutFrameCount 	(0)
+    mAudioOutFrameCount     (0)
 
 {
     ::memset (mACInputBuffer,       0x0, sizeof (mACInputBuffer));
     ::memset (mVideoHevcBuffer,     0x0, sizeof (mVideoHevcBuffer));
     ::memset (mAudioInputBuffer,    0x0, sizeof (mAudioInputBuffer));
 
-}	//	constructor
+}    //    constructor
 
 
 NTV2GstAV::~NTV2GstAV ()
 {
-	//	Stop my capture and consumer threads, then destroy them...
-	Quit ();
+    //    Stop my capture and consumer threads, then destroy them...
+    Quit ();
 
     if (mM31 != NULL)
-	{
-		delete mM31;
-		mM31 = NULL;
-	}
-	
-	// unsubscribe from input vertical event...
-	mDevice.UnsubscribeInputVerticalEvent (mInputChannel);
+    {
+        delete mM31;
+        mM31 = NULL;
+    }
+    
+    // unsubscribe from input vertical event...
+    mDevice.UnsubscribeInputVerticalEvent (mInputChannel);
     
     FreeHostBuffers();
 
@@ -89,15 +89,15 @@ AJAStatus NTV2GstAV::Open (void)
     if (mDeviceID != DEVICE_ID_NOTFOUND)
         return AJA_STATUS_SUCCESS;
 
-    //	Open the device...
-	if (!CNTV2DeviceScanner::GetFirstDeviceFromArgument (mDeviceSpecifier, mDevice))
+    //    Open the device...
+    if (!CNTV2DeviceScanner::GetFirstDeviceFromArgument (mDeviceSpecifier, mDevice))
     {
         GST_ERROR ("ERROR: Device not found");
         return AJA_STATUS_OPEN;
     }
     
-	mDevice.SetEveryFrameServices (NTV2_OEM_TASKS);			//	Since this is an OEM app, use the OEM service level
-	mDeviceID = mDevice.GetDeviceID ();						//	Keep the device ID handy, as it's used frequently
+    mDevice.SetEveryFrameServices (NTV2_OEM_TASKS);            //    Since this is an OEM app, use the OEM service level
+    mDeviceID = mDevice.GetDeviceID ();                        //    Keep the device ID handy, as it's used frequently
 
     return AJA_STATUS_SUCCESS;
 }
@@ -105,7 +105,7 @@ AJAStatus NTV2GstAV::Open (void)
 
 AJAStatus NTV2GstAV::Close (void)
 {
-    AJAStatus	status	(AJA_STATUS_SUCCESS);
+    AJAStatus    status    (AJA_STATUS_SUCCESS);
 
     mDeviceID = DEVICE_ID_NOTFOUND;;
 
@@ -123,9 +123,9 @@ AJAStatus NTV2GstAV::Init (const M31VideoPreset         inPreset,
                                const bool                   inTimeCode,
                                const bool                   inInfoData)
 {
-    AJAStatus	status	(AJA_STATUS_SUCCESS);
+    AJAStatus    status    (AJA_STATUS_SUCCESS);
 
-    mPreset			= inPreset;
+    mPreset            = inPreset;
     mVideoFormat    = inVideoFormat;
     mBitDepth       = inBitDepth;
     mIs422          = inIs422;
@@ -199,19 +199,19 @@ AJAStatus NTV2GstAV::Init (const M31VideoPreset         inPreset,
         }
     }
 
-    //	Setup frame buffer
-	status = SetupVideo ();
-	if (AJA_FAILURE (status))
+    //    Setup frame buffer
+    status = SetupVideo ();
+    if (AJA_FAILURE (status))
     {
         GST_ERROR ("Video setup failure");
-		return status;
+        return status;
     }
 
-    //	Route input signals to frame buffers
-	RouteInputSignal ();
+    //    Route input signals to frame buffers
+    RouteInputSignal ();
     
 
-	//	Setup codec
+    //    Setup codec
     if (mHevcOutput)
     {
         status = SetupHEVC ();
@@ -227,16 +227,16 @@ AJAStatus NTV2GstAV::Init (const M31VideoPreset         inPreset,
 
 AJAStatus NTV2GstAV::InitAudio (uint32_t *numAudioChannels)
 {
-    AJAStatus	status	(AJA_STATUS_SUCCESS);
+    AJAStatus    status    (AJA_STATUS_SUCCESS);
 
     mNumAudioChannels = *numAudioChannels;
 
-	//	Setup audio buffer
-	status = SetupAudio ();
-	if (AJA_FAILURE (status))
+    //    Setup audio buffer
+    status = SetupAudio ();
+    if (AJA_FAILURE (status))
     {
         GST_ERROR ("Audio setup failure");
-		return status;
+        return status;
     }
 
     ULWord nchannels = -1;
@@ -249,15 +249,15 @@ AJAStatus NTV2GstAV::InitAudio (uint32_t *numAudioChannels)
 void NTV2GstAV::Quit (void)
 {
     if (!mLastFrame && !mGlobalQuit)
-	{
-		//	Set the last frame flag to start the quit process
-		mLastFrame = true;
+    {
+        //    Set the last frame flag to start the quit process
+        mLastFrame = true;
 
-		//	Wait for the last frame to be written to disk
-		int i;
-		int timeout = 300;
-		for (i = 0; i < timeout; i++)
-		{
+        //    Wait for the last frame to be written to disk
+        int i;
+        int timeout = 300;
+        for (i = 0; i < timeout; i++)
+        {
             if (mHevcOutput)
             {
                 if (mLastFrameHevcOut && mLastFrameAudioOut) break;
@@ -266,15 +266,15 @@ void NTV2GstAV::Quit (void)
             {
                 if (mLastFrameVideoOut && mLastFrameAudioOut) break;
             }
-			AJATime::Sleep (10);
-		}
+            AJATime::Sleep (10);
+        }
 
-		if (i == timeout)
+        if (i == timeout)
             GST_ERROR ("ERROR: Wait for last frame timeout");
 
         if (mM31 && mHevcOutput)
         {
-            //	Stop the encoder stream
+            //    Stop the encoder stream
             if (!mM31->ChangeEHState(Hevc_EhState_ReadyToStop, mEncodeChannel))
                 GST_ERROR ("ERROR: ChangeEHState ready to stop failed");
 
@@ -287,15 +287,15 @@ void NTV2GstAV::Quit (void)
 
             if(!mMultiStream)
             {
-                //	Now go to the init state
+                //    Now go to the init state
                 if (!mM31->ChangeMainState(Hevc_MainState_Init, Hevc_EncodeMode_Single))
                     GST_ERROR ("ERROR: ChangeMainState to init failed");
             }
         }
-	}
+    }
 
-	//	Stop the worker threads
-	mGlobalQuit = true;
+    //    Stop the worker threads
+    mGlobalQuit = true;
     mStarted = false;
 
     StopACThread();
@@ -470,119 +470,119 @@ AJAStatus NTV2GstAV::SetupHEVC (void)
             { GST_ERROR ("ERROR: EH didn't start = %d", ehState); return AJA_STATUS_INITIALIZE; }
     }
 
-	return AJA_STATUS_SUCCESS;
+    return AJA_STATUS_SUCCESS;
 }
     
     
 AJAStatus NTV2GstAV::SetupVideo (void)
 {
-	//	Setup frame buffer
-	if (mQuad)
-	{
-		if (mInputChannel != NTV2_CHANNEL1)
-			return AJA_STATUS_FAIL;
+    //    Setup frame buffer
+    if (mQuad)
+    {
+        if (mInputChannel != NTV2_CHANNEL1)
+            return AJA_STATUS_FAIL;
 
-		//	Disable multiformat
-		if (::NTV2DeviceCanDoMultiFormat (mDeviceID))
-			mDevice.SetMultiFormatMode (false);
+        //    Disable multiformat
+        if (::NTV2DeviceCanDoMultiFormat (mDeviceID))
+            mDevice.SetMultiFormatMode (false);
 
-		//	Set the board video format
-		mDevice.SetVideoFormat (mVideoFormat, false, false, NTV2_CHANNEL1);
+        //    Set the board video format
+        mDevice.SetVideoFormat (mVideoFormat, false, false, NTV2_CHANNEL1);
 
-		//	Set frame buffer format
-		mDevice.SetFrameBufferFormat (NTV2_CHANNEL1, mPixelFormat);
-		mDevice.SetFrameBufferFormat (NTV2_CHANNEL2, mPixelFormat);
-		mDevice.SetFrameBufferFormat (NTV2_CHANNEL3, mPixelFormat);
-		mDevice.SetFrameBufferFormat (NTV2_CHANNEL4, mPixelFormat);
+        //    Set frame buffer format
+        mDevice.SetFrameBufferFormat (NTV2_CHANNEL1, mPixelFormat);
+        mDevice.SetFrameBufferFormat (NTV2_CHANNEL2, mPixelFormat);
+        mDevice.SetFrameBufferFormat (NTV2_CHANNEL3, mPixelFormat);
+        mDevice.SetFrameBufferFormat (NTV2_CHANNEL4, mPixelFormat);
         mDevice.SetFrameBufferFormat (NTV2_CHANNEL5, mPixelFormat);
         mDevice.SetFrameBufferFormat (NTV2_CHANNEL6, mPixelFormat);
         mDevice.SetFrameBufferFormat (NTV2_CHANNEL7, mPixelFormat);
         mDevice.SetFrameBufferFormat (NTV2_CHANNEL8, mPixelFormat);
 
-		//	Set catpure mode
-		mDevice.SetMode (NTV2_CHANNEL1, NTV2_MODE_CAPTURE, false);
-		mDevice.SetMode (NTV2_CHANNEL2, NTV2_MODE_CAPTURE, false);
-		mDevice.SetMode (NTV2_CHANNEL3, NTV2_MODE_CAPTURE, false);
-		mDevice.SetMode (NTV2_CHANNEL4, NTV2_MODE_CAPTURE, false);
+        //    Set catpure mode
+        mDevice.SetMode (NTV2_CHANNEL1, NTV2_MODE_CAPTURE, false);
+        mDevice.SetMode (NTV2_CHANNEL2, NTV2_MODE_CAPTURE, false);
+        mDevice.SetMode (NTV2_CHANNEL3, NTV2_MODE_CAPTURE, false);
+        mDevice.SetMode (NTV2_CHANNEL4, NTV2_MODE_CAPTURE, false);
         mDevice.SetMode (NTV2_CHANNEL5, NTV2_MODE_DISPLAY, false);
         mDevice.SetMode (NTV2_CHANNEL6, NTV2_MODE_DISPLAY, false);
         mDevice.SetMode (NTV2_CHANNEL7, NTV2_MODE_DISPLAY, false);
         mDevice.SetMode (NTV2_CHANNEL8, NTV2_MODE_DISPLAY, false);
 
-		//	Enable frame buffers
-		mDevice.EnableChannel (NTV2_CHANNEL1);
-		mDevice.EnableChannel (NTV2_CHANNEL2);
-		mDevice.EnableChannel (NTV2_CHANNEL3);
-		mDevice.EnableChannel (NTV2_CHANNEL4);
+        //    Enable frame buffers
+        mDevice.EnableChannel (NTV2_CHANNEL1);
+        mDevice.EnableChannel (NTV2_CHANNEL2);
+        mDevice.EnableChannel (NTV2_CHANNEL3);
+        mDevice.EnableChannel (NTV2_CHANNEL4);
         mDevice.EnableChannel (NTV2_CHANNEL5);
         mDevice.EnableChannel (NTV2_CHANNEL6);
         mDevice.EnableChannel (NTV2_CHANNEL7);
         mDevice.EnableChannel (NTV2_CHANNEL8);
 
-		//	Save input source
-		mInputSource = ::NTV2ChannelToInputSource (NTV2_CHANNEL1);
-	}
+        //    Save input source
+        mInputSource = ::NTV2ChannelToInputSource (NTV2_CHANNEL1);
+    }
     else if (mMultiStream)
-	{
-		//	Configure for multiformat
-		if (::NTV2DeviceCanDoMultiFormat (mDeviceID))
-			mDevice.SetMultiFormatMode (true);
+    {
+        //    Configure for multiformat
+        if (::NTV2DeviceCanDoMultiFormat (mDeviceID))
+            mDevice.SetMultiFormatMode (true);
 
-		//	Set the channel video format
-		mDevice.SetVideoFormat (mVideoFormat, false, false, mInputChannel);
+        //    Set the channel video format
+        mDevice.SetVideoFormat (mVideoFormat, false, false, mInputChannel);
         mDevice.SetVideoFormat (mVideoFormat, false, false, mOutputChannel);
 
-		//	Set frame buffer format
-		mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
+        //    Set frame buffer format
+        mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
         mDevice.SetFrameBufferFormat (mOutputChannel, mPixelFormat);
 
-		//	Set catpure mode
-		mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
+        //    Set catpure mode
+        mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
         mDevice.SetMode (mOutputChannel, NTV2_MODE_DISPLAY, false);
 
-		//	Enable frame buffer
-		mDevice.EnableChannel (mInputChannel);
+        //    Enable frame buffer
+        mDevice.EnableChannel (mInputChannel);
         mDevice.EnableChannel (mOutputChannel);
 
-		//	Save input source
-		mInputSource = ::NTV2ChannelToInputSource (mInputChannel);
-	}
-	else
-	{
-		//	Disable multiformat mode
-		if (::NTV2DeviceCanDoMultiFormat (mDeviceID))
-			mDevice.SetMultiFormatMode (false);
+        //    Save input source
+        mInputSource = ::NTV2ChannelToInputSource (mInputChannel);
+    }
+    else
+    {
+        //    Disable multiformat mode
+        if (::NTV2DeviceCanDoMultiFormat (mDeviceID))
+            mDevice.SetMultiFormatMode (false);
 
-		//	Set the board format
+        //    Set the board format
         mDevice.SetVideoFormat (mVideoFormat, false, false, NTV2_CHANNEL1);
         mDevice.SetVideoFormat (mVideoFormat, false, false, NTV2_CHANNEL5);
 
-		//	Set frame buffer format
-		mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
+        //    Set frame buffer format
+        mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
         mDevice.SetFrameBufferFormat (mOutputChannel, mPixelFormat);
 
-		//	Set display mode
-		mDevice.SetMode (NTV2_CHANNEL1, NTV2_MODE_DISPLAY, false);
-		mDevice.SetMode (NTV2_CHANNEL2, NTV2_MODE_DISPLAY, false);
-		mDevice.SetMode (NTV2_CHANNEL3, NTV2_MODE_DISPLAY, false);
-		mDevice.SetMode (NTV2_CHANNEL4, NTV2_MODE_DISPLAY, false);
+        //    Set display mode
+        mDevice.SetMode (NTV2_CHANNEL1, NTV2_MODE_DISPLAY, false);
+        mDevice.SetMode (NTV2_CHANNEL2, NTV2_MODE_DISPLAY, false);
+        mDevice.SetMode (NTV2_CHANNEL3, NTV2_MODE_DISPLAY, false);
+        mDevice.SetMode (NTV2_CHANNEL4, NTV2_MODE_DISPLAY, false);
         mDevice.SetMode (NTV2_CHANNEL5, NTV2_MODE_DISPLAY, false);
         mDevice.SetMode (NTV2_CHANNEL6, NTV2_MODE_DISPLAY, false);
         mDevice.SetMode (NTV2_CHANNEL7, NTV2_MODE_DISPLAY, false);
         mDevice.SetMode (NTV2_CHANNEL8, NTV2_MODE_DISPLAY, false);
 
-		//	Set catpure mode
-		mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
+        //    Set catpure mode
+        mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
 
-		//	Enable frame buffer
-		mDevice.EnableChannel (mInputChannel);
+        //    Enable frame buffer
+        mDevice.EnableChannel (mInputChannel);
         mDevice.EnableChannel (mOutputChannel);
 
-		//	Save input source
-		mInputSource = ::NTV2ChannelToInputSource (mInputChannel);
-	}
+        //    Save input source
+        mInputSource = ::NTV2ChannelToInputSource (mInputChannel);
+    }
 
-	//	Set the device reference to the input...
+    //    Set the device reference to the input...
     if (mMultiStream)
     {
         mDevice.SetReference (NTV2_REFERENCE_FREERUN);
@@ -592,27 +592,26 @@ AJAStatus NTV2GstAV::SetupVideo (void)
         mDevice.SetReference (::NTV2InputSourceToReferenceSource (mInputSource));
     }
 
-	//	Enable and subscribe to the interrupts for the channel to be used...
-	mDevice.EnableInputInterrupt (mInputChannel);
-	mDevice.SubscribeInputVerticalEvent (mInputChannel);
+    //    Enable and subscribe to the interrupts for the channel to be used...
+    mDevice.EnableInputInterrupt (mInputChannel);
+    mDevice.SubscribeInputVerticalEvent (mInputChannel);
 
     mTimeBase.SetAJAFrameRate (GetAJAFrameRate(GetNTV2FrameRateFromVideoFormat (mVideoFormat)));
 
-	return AJA_STATUS_SUCCESS;
+    return AJA_STATUS_SUCCESS;
 
-}	//	SetupVideo
+}    //    SetupVideo
 
 
 AJAStatus NTV2GstAV::SetupAudio (void)
 {
-	ULWord numAudio = ::NTV2DeviceGetNumAudioSystems(mDeviceID);
-	
-    //	In multiformat mode, base the audio system on the channel...
+    ULWord numAudio = ::NTV2DeviceGetNumAudioSystems(mDeviceID);
+    //    In multiformat mode, base the audio system on the channel...
     if (mMultiStream && numAudio > 1 && UWord (mInputChannel) < numAudio)
-		mAudioSystem = ::NTV2ChannelToAudioSystem (mInputChannel);
+        mAudioSystem = ::NTV2ChannelToAudioSystem (mInputChannel);
 
-	//	Have the audio system capture audio from the designated device input (i.e., ch1 uses SDIIn1, ch2 uses SDIIn2, etc.)...
-	mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, ::NTV2ChannelToEmbeddedAudioInput (mInputChannel));
+    //    Have the audio system capture audio from the designated device input (i.e., ch1 uses SDIIn1, ch2 uses SDIIn2, etc.)...
+    mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, ::NTV2ChannelToEmbeddedAudioInput (mInputChannel));
 
     if (mNumAudioChannels == 0)
       mNumAudioChannels = ::NTV2DeviceGetMaxAudioChannels (mDeviceID);
@@ -625,43 +624,43 @@ AJAStatus NTV2GstAV::SetupAudio (void)
     mDevice.SetAudioRate (NTV2_AUDIO_48K, mAudioSystem);
     mDevice.SetEmbeddedAudioClock (NTV2_EMBEDDED_AUDIO_CLOCK_VIDEO_INPUT, mAudioSystem);
 
-	//	The on-device audio buffer should be 4MB to work best across all devices & platforms...
-	mDevice.SetAudioBufferSize (NTV2_AUDIO_BUFFER_BIG, mAudioSystem);
+    //    The on-device audio buffer should be 4MB to work best across all devices & platforms...
+    mDevice.SetAudioBufferSize (NTV2_AUDIO_BUFFER_BIG, mAudioSystem);
 
-	return AJA_STATUS_SUCCESS;
+    return AJA_STATUS_SUCCESS;
 
-}	//	SetupAudio
+}    //    SetupAudio
 
 
 void NTV2GstAV::SetupHostBuffers (void)
 {
-	mVideoBufferSize = GetVideoActiveSize (mVideoFormat, mPixelFormat, NTV2_VANCMODE_OFF);
+    mVideoBufferSize = GetVideoActiveSize (mVideoFormat, mPixelFormat, NTV2_VANCMODE_OFF);
     mPicInfoBufferSize = sizeof(HevcPictureInfo)*2;
     mEncInfoBufferSize = sizeof(HevcEncodedInfo)*2;
     mAudioBufferSize = NTV2_AUDIOSIZE_MAX;
-	
-	// video input ring
+
+    // video input ring
     mACInputCircularBuffer.SetAbortFlag (&mGlobalQuit);
     for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++ )
-	{
+    {
         memset (&mACInputBuffer[bufferNdx], 0, sizeof(AjaVideoBuff));
-        mACInputBuffer[bufferNdx].pVideoBuffer		= new uint32_t [mVideoBufferSize/4];
-        mACInputBuffer[bufferNdx].videoBufferSize	= mVideoBufferSize;
-        mACInputBuffer[bufferNdx].videoDataSize		= 0;
-        mACInputBuffer[bufferNdx].pInfoBuffer		= new uint32_t [mPicInfoBufferSize/4];
+        mACInputBuffer[bufferNdx].pVideoBuffer        = new uint32_t [mVideoBufferSize/4];
+        mACInputBuffer[bufferNdx].videoBufferSize    = mVideoBufferSize;
+        mACInputBuffer[bufferNdx].videoDataSize        = 0;
+        mACInputBuffer[bufferNdx].pInfoBuffer        = new uint32_t [mPicInfoBufferSize/4];
         mACInputBuffer[bufferNdx].infoBufferSize    = mPicInfoBufferSize;
-        mACInputBuffer[bufferNdx].infoDataSize		= 0;
+        mACInputBuffer[bufferNdx].infoDataSize        = 0;
         mACInputCircularBuffer.Add (& mACInputBuffer[bufferNdx]);
-	}
+    }
     
     // audio input ring
     mAudioInputCircularBuffer.SetAbortFlag (&mGlobalQuit);
     for (unsigned bufferNdx = 0; bufferNdx < AUDIO_RING_SIZE; bufferNdx++ )
     {
         memset (&mAudioInputBuffer[bufferNdx], 0, sizeof(AjaAudioBuff));
-        mAudioInputBuffer[bufferNdx].pAudioBuffer		= new uint32_t [mAudioBufferSize/4];
-        mAudioInputBuffer[bufferNdx].audioBufferSize	= mAudioBufferSize;
-        mAudioInputBuffer[bufferNdx].audioDataSize		= 0;
+        mAudioInputBuffer[bufferNdx].pAudioBuffer        = new uint32_t [mAudioBufferSize/4];
+        mAudioInputBuffer[bufferNdx].audioBufferSize    = mAudioBufferSize;
+        mAudioInputBuffer[bufferNdx].audioDataSize        = 0;
         mAudioInputCircularBuffer.Add (& mAudioInputBuffer[bufferNdx]);
     }
 
@@ -672,12 +671,12 @@ void NTV2GstAV::SetupHostBuffers (void)
         for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++ )
         {
             memset (&mVideoHevcBuffer[bufferNdx], 0, sizeof(AjaVideoBuff));
-            mVideoHevcBuffer[bufferNdx].pVideoBuffer	= new uint32_t [mVideoBufferSize/4];
-            mVideoHevcBuffer[bufferNdx].videoBufferSize	= mVideoBufferSize;
-            mVideoHevcBuffer[bufferNdx].videoDataSize	= 0;
-            mVideoHevcBuffer[bufferNdx].pInfoBuffer		= new uint32_t [mEncInfoBufferSize/4];
+            mVideoHevcBuffer[bufferNdx].pVideoBuffer    = new uint32_t [mVideoBufferSize/4];
+            mVideoHevcBuffer[bufferNdx].videoBufferSize    = mVideoBufferSize;
+            mVideoHevcBuffer[bufferNdx].videoDataSize    = 0;
+            mVideoHevcBuffer[bufferNdx].pInfoBuffer        = new uint32_t [mEncInfoBufferSize/4];
             mVideoHevcBuffer[bufferNdx].infoBufferSize   = mEncInfoBufferSize;
-            mVideoHevcBuffer[bufferNdx].infoDataSize		= 0;
+            mVideoHevcBuffer[bufferNdx].infoDataSize        = 0;
             mVideoHevcCircularBuffer.Add (& mVideoHevcBuffer[bufferNdx]);
         }
     }
@@ -685,17 +684,17 @@ void NTV2GstAV::SetupHostBuffers (void)
     // These video buffers are actually passed out of this class so we need to assign them unique numbers
     // so they can be tracked and also they have a state
     for (unsigned bufferNdx = 0; bufferNdx < VIDEO_ARRAY_SIZE; bufferNdx++ )
-	{
+    {
         memset (&mVideoOutBuffer[bufferNdx], 0, sizeof(AjaVideoBuff));
         mVideoOutBuffer[bufferNdx].bufferId         = bufferNdx + 1;
         mVideoOutBuffer[bufferNdx].bufferRef        = 0;
-        mVideoOutBuffer[bufferNdx].pVideoBuffer		= new uint32_t [mVideoBufferSize/4];
-        mVideoOutBuffer[bufferNdx].videoBufferSize	= mVideoBufferSize;
-        mVideoOutBuffer[bufferNdx].videoDataSize	= 0;
-        mVideoOutBuffer[bufferNdx].pInfoBuffer		= new uint32_t [mPicInfoBufferSize/4];
+        mVideoOutBuffer[bufferNdx].pVideoBuffer        = new uint32_t [mVideoBufferSize/4];
+        mVideoOutBuffer[bufferNdx].videoBufferSize    = mVideoBufferSize;
+        mVideoOutBuffer[bufferNdx].videoDataSize    = 0;
+        mVideoOutBuffer[bufferNdx].pInfoBuffer        = new uint32_t [mPicInfoBufferSize/4];
         mVideoOutBuffer[bufferNdx].infoBufferSize   = mPicInfoBufferSize;
-        mVideoOutBuffer[bufferNdx].infoDataSize		= 0;
-	}
+        mVideoOutBuffer[bufferNdx].infoDataSize        = 0;
+    }
 
     // These audio buffers are actually passed out of this class so we need to assign them unique numbers
     // so they can be tracked and also they have a state
@@ -706,9 +705,9 @@ void NTV2GstAV::SetupHostBuffers (void)
         mAudioOutBuffer[bufferNdx].bufferRef            = 0;
         mAudioOutBuffer[bufferNdx].pAudioBuffer         = new uint32_t [mAudioBufferSize/4];
         mAudioOutBuffer[bufferNdx].audioBufferSize      = mAudioBufferSize;
-        mAudioOutBuffer[bufferNdx].audioDataSize		= 0;
+        mAudioOutBuffer[bufferNdx].audioDataSize        = 0;
     }
-}	//	SetupHostBuffers
+}    //    SetupHostBuffers
 
 
 void NTV2GstAV::FreeHostBuffers (void)
@@ -781,69 +780,69 @@ void NTV2GstAV::FreeHostBuffers (void)
 void NTV2GstAV::RouteInputSignal (void)
 {
     // setup sdi io
-	mDevice.SetSDITransmitEnable (NTV2_CHANNEL1, false);
-	mDevice.SetSDITransmitEnable (NTV2_CHANNEL2, false);
-	mDevice.SetSDITransmitEnable (NTV2_CHANNEL3, false);
-	mDevice.SetSDITransmitEnable (NTV2_CHANNEL4, false);
+    mDevice.SetSDITransmitEnable (NTV2_CHANNEL1, false);
+    mDevice.SetSDITransmitEnable (NTV2_CHANNEL2, false);
+    mDevice.SetSDITransmitEnable (NTV2_CHANNEL3, false);
+    mDevice.SetSDITransmitEnable (NTV2_CHANNEL4, false);
     mDevice.SetSDITransmitEnable (NTV2_CHANNEL5, true);
     mDevice.SetSDITransmitEnable (NTV2_CHANNEL6, true);
     mDevice.SetSDITransmitEnable (NTV2_CHANNEL7, true);
     mDevice.SetSDITransmitEnable (NTV2_CHANNEL8, true);
 
-	//	Give the device some time to lock to the input signal...
-	mDevice.WaitForOutputVerticalInterrupt (mInputChannel, 8);
+    //    Give the device some time to lock to the input signal...
+    mDevice.WaitForOutputVerticalInterrupt (mInputChannel, 8);
 
-	//	When input is 3Gb convert to 3Ga for capture (no RGB support?)
-	bool is3Gb = false;
-	mDevice.GetSDIInput3GbPresent (is3Gb, mInputChannel);
+    //    When input is 3Gb convert to 3Ga for capture (no RGB support?)
+    bool is3Gb = false;
+    mDevice.GetSDIInput3GbPresent (is3Gb, mInputChannel);
 
-	if (mQuad)
-	{
-		mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL1, is3Gb);
-		mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL2, is3Gb);
-		mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL3, is3Gb);
-		mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL4, is3Gb);
+    if (mQuad)
+    {
+        mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL1, is3Gb);
+        mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL2, is3Gb);
+        mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL3, is3Gb);
+        mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL4, is3Gb);
         mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL5, false);
         mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL6, false);
         mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL7, false);
         mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL8, false);
     }
-	else
-	{
-		mDevice.SetSDIInLevelBtoLevelAConversion (mInputChannel, is3Gb);
+    else
+    {
+        mDevice.SetSDIInLevelBtoLevelAConversion (mInputChannel, is3Gb);
         mDevice.SetSDIOutLevelAtoLevelBConversion (mOutputChannel, false);
     }
 
-	if (!mMultiStream)			//	If not doing multistream...
-		mDevice.ClearRouting();	//	...replace existing routing
+    if (!mMultiStream)            //    If not doing multistream...
+        mDevice.ClearRouting();    //    ...replace existing routing
 
-	//	Connect FB inputs to SDI input spigots...
-	mDevice.Connect (NTV2_XptFrameBuffer1Input, NTV2_XptSDIIn1);
-	mDevice.Connect (NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
-	mDevice.Connect (NTV2_XptFrameBuffer3Input, NTV2_XptSDIIn3);
-	mDevice.Connect (NTV2_XptFrameBuffer4Input, NTV2_XptSDIIn4);
+    //    Connect FB inputs to SDI input spigots...
+    mDevice.Connect (NTV2_XptFrameBuffer1Input, NTV2_XptSDIIn1);
+    mDevice.Connect (NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
+    mDevice.Connect (NTV2_XptFrameBuffer3Input, NTV2_XptSDIIn3);
+    mDevice.Connect (NTV2_XptFrameBuffer4Input, NTV2_XptSDIIn4);
 
-	//	Connect SDI output spigots to FB outputs...
+    //    Connect SDI output spigots to FB outputs...
     mDevice.Connect (NTV2_XptSDIOut5Input, NTV2_XptFrameBuffer5YUV);
     mDevice.Connect (NTV2_XptSDIOut6Input, NTV2_XptFrameBuffer6YUV);
     mDevice.Connect (NTV2_XptSDIOut7Input, NTV2_XptFrameBuffer7YUV);
     mDevice.Connect (NTV2_XptSDIOut8Input, NTV2_XptFrameBuffer8YUV);
 
-	//	Give the device some time to lock to the input signal...
-	mDevice.WaitForOutputVerticalInterrupt (mInputChannel, 8);
+    //    Give the device some time to lock to the input signal...
+    mDevice.WaitForOutputVerticalInterrupt (mInputChannel, 8);
 }
 
 
 void NTV2GstAV::SetupAutoCirculate (void)
 {
-	//	Tell capture AutoCirculate to use 8 frame buffers on the device...
+    //    Tell capture AutoCirculate to use 8 frame buffers on the device...
     mInputTransferStruct.Clear();
     mInputTransferStruct.acFrameBufferFormat = mPixelFormat;
 
-	mDevice.AutoCirculateStop (mInputChannel);
-	mDevice.AutoCirculateInitForInput (mInputChannel,	8,                  //	Frames to circulate
-										mAudioSystem,                       //	Which audio system
-										AUTOCIRCULATE_WITH_RP188);          //	With RP188?
+    mDevice.AutoCirculateStop (mInputChannel);
+    mDevice.AutoCirculateInitForInput (mInputChannel,    8,                  //    Frames to circulate
+                                        mAudioSystem,                       //    Which audio system
+                                        AUTOCIRCULATE_WITH_RP188);          //    With RP188?
 }
 
 
@@ -864,16 +863,16 @@ AJAStatus NTV2GstAV::Run ()
     mGlobalQuit = false;
 
       
-	//	Setup to capture video/audio/anc input
+    //    Setup to capture video/audio/anc input
     SetupAutoCirculate ();
     
-	//	Setup the circular buffers
-	SetupHostBuffers ();
+    //    Setup the circular buffers
+    SetupHostBuffers ();
 
-	if (mDevice.GetInputVideoFormat (mInputSource) == NTV2_FORMAT_UNKNOWN)
+    if (mDevice.GetInputVideoFormat (mInputSource) == NTV2_FORMAT_UNKNOWN)
         GST_WARNING ("No video signal present on the input connector");
 
-	// always start the AC thread
+    // always start the AC thread
     StartACThread ();
     
     // if not doing hevc output then just start the video output thread otherwise start the hevc threads
@@ -891,7 +890,7 @@ AJAStatus NTV2GstAV::Run ()
     }
     
     mStarted = true;
-	return AJA_STATUS_SUCCESS;
+    return AJA_STATUS_SUCCESS;
 }
 
 
@@ -914,7 +913,7 @@ void NTV2GstAV::StopACThread (void)
             AJATime::Sleep (10);
         
         delete mACInputThread;
-		mACInputThread = NULL;
+        mACInputThread = NULL;
     }
 }
 
@@ -922,30 +921,30 @@ void NTV2GstAV::StopACThread (void)
 // The video input thread static callback
 void NTV2GstAV::ACInputThreadStatic (AJAThread * pThread, void * pContext)
 {
-	(void) pThread;
+    (void) pThread;
 
-	NTV2GstAV *	pApp (reinterpret_cast <NTV2GstAV *> (pContext));
+    NTV2GstAV *    pApp (reinterpret_cast <NTV2GstAV *> (pContext));
     pApp->ACInputWorker ();
 }
 
 
 void NTV2GstAV::ACInputWorker (void)
 {
-	// start AutoCirculate running...
-	mDevice.AutoCirculateStart (mInputChannel);
+    // start AutoCirculate running...
+    mDevice.AutoCirculateStart (mInputChannel);
 
-	while (!mGlobalQuit)
-	{
-		AUTOCIRCULATE_STATUS	acStatus;
-		mDevice.AutoCirculateGetStatus (mInputChannel, acStatus);
+    while (!mGlobalQuit)
+    {
+        AUTOCIRCULATE_STATUS    acStatus;
+        mDevice.AutoCirculateGetStatus (mInputChannel, acStatus);
 
         // wait for captured frame
-		if (acStatus.acState == NTV2_AUTOCIRCULATE_RUNNING && acStatus.acBufferLevel > 1)
-		{
-			// At this point, there's at least one fully-formed frame available in the device's
-			// frame buffer to transfer to the host. Reserve an AvaDataBuffer to "produce", and
-			// use it in the next transfer from the device...
-            AjaVideoBuff *	pVideoData	(mACInputCircularBuffer.StartProduceNextBuffer ());
+        if (acStatus.acState == NTV2_AUTOCIRCULATE_RUNNING && acStatus.acBufferLevel > 1)
+        {
+            // At this point, there's at least one fully-formed frame available in the device's
+            // frame buffer to transfer to the host. Reserve an AvaDataBuffer to "produce", and
+            // use it in the next transfer from the device...
+            AjaVideoBuff *    pVideoData    (mACInputCircularBuffer.StartProduceNextBuffer ());
             if (pVideoData)
             {
                 // TODO: Use a GstBufferPool for audio/video here instead
@@ -953,7 +952,7 @@ void NTV2GstAV::ACInputWorker (void)
                 mInputTransferStruct.SetVideoBuffer(pVideoData->pVideoBuffer, pVideoData->videoBufferSize);
                 mInputTransferStruct.SetAudioBuffer(NULL, 0);
 
-                AjaAudioBuff *	pAudioData = NULL;
+                AjaAudioBuff *    pAudioData = NULL;
                 pAudioData = mAudioInputCircularBuffer.StartProduceNextBuffer ();
                 if (pAudioData)
                 {
@@ -1030,19 +1029,19 @@ void NTV2GstAV::ACInputWorker (void)
                 {
                     mACInputCircularBuffer.EndProduceNextBuffer ();
                 }
-            }	// if A/C running and frame(s) are available for transfer
+            }    // if A/C running and frame(s) are available for transfer
         }
-		else
-		{
-			// Either AutoCirculate is not running, or there were no frames available on the device to transfer.
-			// Rather than waste CPU cycles spinning, waiting until a frame becomes available, it's far more
-			// efficient to wait for the next input vertical interrupt event to get signaled...
+        else
+        {
+            // Either AutoCirculate is not running, or there were no frames available on the device to transfer.
+            // Rather than waste CPU cycles spinning, waiting until a frame becomes available, it's far more
+            // efficient to wait for the next input vertical interrupt event to get signaled...
             mDevice.WaitForInputVerticalInterrupt (mInputChannel);
-		}
-	}	// loop til quit signaled
+        }
+    }    // loop til quit signaled
 
-	// Stop AutoCirculate...
-	mDevice.AutoCirculateStop (mInputChannel);
+    // Stop AutoCirculate...
+    mDevice.AutoCirculateStop (mInputChannel);
 }
 
 
@@ -1064,7 +1063,7 @@ void NTV2GstAV::StopVideoOutputThread (void)
             AJATime::Sleep (10);
         
         delete mVideoOutputThread;
-		mVideoOutputThread = NULL;
+        mVideoOutputThread = NULL;
     }
 }
 
@@ -1072,23 +1071,23 @@ void NTV2GstAV::StopVideoOutputThread (void)
 // The video output static callback
 void NTV2GstAV::VideoOutputThreadStatic (AJAThread * pThread, void * pContext)
 {
-	(void) pThread;
+    (void) pThread;
 
-	NTV2GstAV *	pApp (reinterpret_cast <NTV2GstAV *> (pContext));
+    NTV2GstAV *    pApp (reinterpret_cast <NTV2GstAV *> (pContext));
     pApp->VideoOutputWorker ();
 }
 
 
 void NTV2GstAV::VideoOutputWorker (void)
 {
-	while (!mGlobalQuit)
-	{
-		// wait for the next video input buffer
-        AjaVideoBuff *	pFrameData (mACInputCircularBuffer.StartConsumeNextBuffer ());
-		if (pFrameData)
-		{
+    while (!mGlobalQuit)
+    {
+        // wait for the next video input buffer
+        AjaVideoBuff *    pFrameData (mACInputCircularBuffer.StartConsumeNextBuffer ());
+        if (pFrameData)
+        {
             if (!mLastFrameVideoOut)
-			{
+            {
                 AjaVideoBuff * pDstFrame = AcquireVideoBuffer();
                 if (pDstFrame)
                 {
@@ -1113,19 +1112,19 @@ void NTV2GstAV::VideoOutputWorker (void)
                 }
                 
                 if (pFrameData->lastFrame)
-				{
+                {
                     GST_INFO ("Video out last frame number %d", mVideoOutFrameCount);
-					mLastFrameVideoOut = true;
-				}
+                    mLastFrameVideoOut = true;
+                }
                 
                 mVideoOutFrameCount++;
             }
             
-			// release the video input buffer
+            // release the video input buffer
             mACInputCircularBuffer.EndConsumeNextBuffer ();
 
         }
-	}	// loop til quit signaled
+    }    // loop til quit signaled
 }
 
 
@@ -1148,7 +1147,7 @@ void NTV2GstAV::StopCodecRawThread (void)
             AJATime::Sleep (10);
         
         delete mCodecRawThread;
-		mCodecRawThread = NULL;
+        mCodecRawThread = NULL;
     }
 }
 
@@ -1156,23 +1155,23 @@ void NTV2GstAV::StopCodecRawThread (void)
 // The codec raw static callback
 void NTV2GstAV::CodecRawThreadStatic (AJAThread * pThread, void * pContext)
 {
-	(void) pThread;
+    (void) pThread;
 
-	NTV2GstAV *	pApp (reinterpret_cast <NTV2GstAV *> (pContext));
+    NTV2GstAV *    pApp (reinterpret_cast <NTV2GstAV *> (pContext));
     pApp->CodecRawWorker ();
 }
 
 
 void NTV2GstAV::CodecRawWorker (void)
 {
-	while (!mGlobalQuit)
-	{
-		// wait for the next raw video frame
-        AjaVideoBuff *	pFrameData (mACInputCircularBuffer.StartConsumeNextBuffer ());
-		if (pFrameData)
-		{
-			if (!mLastFrameVideoOut)
-			{
+    while (!mGlobalQuit)
+    {
+        // wait for the next raw video frame
+        AjaVideoBuff *    pFrameData (mACInputCircularBuffer.StartConsumeNextBuffer ());
+        if (pFrameData)
+        {
+            if (!mLastFrameVideoOut)
+            {
                 // transfer the raw video frame to the codec
                 if (mWithInfo)
                 {
@@ -1191,17 +1190,17 @@ void NTV2GstAV::CodecRawWorker (void)
                                       pFrameData->lastFrame);
                 }
                 if (pFrameData->lastFrame)
-				{
-					mLastFrameVideoOut = true;
-				}
+                {
+                    mLastFrameVideoOut = true;
+                }
 
                 mCodecRawFrameCount++;
             }
 
-			// release the raw video frame
+            // release the raw video frame
             mACInputCircularBuffer.EndConsumeNextBuffer ();
-		}
-	}  // loop til quit signaled
+        }
+    }  // loop til quit signaled
 }
 
 
@@ -1223,7 +1222,7 @@ void NTV2GstAV::StopCodecHevcThread (void)
             AJATime::Sleep (10);
         
         delete mCodecHevcThread;
-		mCodecHevcThread = NULL;
+        mCodecHevcThread = NULL;
     }
 }
 
@@ -1233,7 +1232,7 @@ void NTV2GstAV::CodecHevcThreadStatic (AJAThread * pThread, void * pContext)
 {
     (void) pThread;
 
-    NTV2GstAV *	pApp (reinterpret_cast <NTV2GstAV *> (pContext));
+    NTV2GstAV *    pApp (reinterpret_cast <NTV2GstAV *> (pContext));
     pApp->CodecHevcWorker ();
 }
 
@@ -1243,15 +1242,15 @@ void NTV2GstAV::CodecHevcWorker (void)
     while (!mGlobalQuit)
     {
         // wait for the next hevc frame 
-        AjaVideoBuff *	pFrameData (mVideoHevcCircularBuffer.StartProduceNextBuffer ());
+        AjaVideoBuff *    pFrameData (mVideoHevcCircularBuffer.StartProduceNextBuffer ());
         if (pFrameData)
         {
-			if (!mLastFrameHevc)
-			{
+            if (!mLastFrameHevc)
+            {
                 // transfer an hevc frame from the codec including encoded information
                 mM31->EncTransfer(mEncodeChannel,
                                   (uint8_t*)pFrameData->pVideoBuffer,
-								  pFrameData->videoBufferSize,
+                                  pFrameData->videoBufferSize,
                                   (uint8_t*)pFrameData->pInfoBuffer,
                                   pFrameData->infoBufferSize,
                                   pFrameData->videoDataSize,
@@ -1259,8 +1258,8 @@ void NTV2GstAV::CodecHevcWorker (void)
                                   pFrameData->lastFrame);
 
                 if (pFrameData->lastFrame)
-				{
-					mLastFrameHevc = true;
+                {
+                    mLastFrameHevc = true;
                 }
 
                 mCodecHevcFrameCount++;
@@ -1269,7 +1268,7 @@ void NTV2GstAV::CodecHevcWorker (void)
             // release and recycle the buffer...
             mVideoHevcCircularBuffer.EndProduceNextBuffer ();
         }
-    }	//	loop til quit signaled
+    }    //    loop til quit signaled
 }
 
 
@@ -1292,7 +1291,7 @@ void NTV2GstAV::StopHevcOutputThread (void)
             AJATime::Sleep (10);
         
         delete mHevcOutputThread;
-		mHevcOutputThread = NULL;
+        mHevcOutputThread = NULL;
     }
 }
 
@@ -1302,7 +1301,7 @@ void NTV2GstAV::HevcOutputThreadStatic (AJAThread * pThread, void * pContext)
 {
     (void) pThread;
 
-    NTV2GstAV *	pApp (reinterpret_cast <NTV2GstAV *> (pContext));
+    NTV2GstAV *    pApp (reinterpret_cast <NTV2GstAV *> (pContext));
     pApp->HevcOutputWorker ();
 
 } // HevcOutputThreadStatic
@@ -1313,7 +1312,7 @@ void NTV2GstAV::HevcOutputWorker (void)
     while (!mGlobalQuit)
     {
         // wait for the next video input buffer
-        AjaVideoBuff *	pFrameData (mVideoHevcCircularBuffer.StartConsumeNextBuffer ());
+        AjaVideoBuff *    pFrameData (mVideoHevcCircularBuffer.StartConsumeNextBuffer ());
         if (pFrameData)
         {
             if (!mLastFrameHevcOut)
@@ -1352,7 +1351,7 @@ void NTV2GstAV::HevcOutputWorker (void)
             // release the video input buffer
             mVideoHevcCircularBuffer.EndConsumeNextBuffer ();
         }
-    }	// loop til quit signaled
+    }    // loop til quit signaled
 }
 
 
@@ -1375,7 +1374,7 @@ void NTV2GstAV::StopAudioOutputThread (void)
             AJATime::Sleep (10);
         
         delete mAudioOutputThread;
-		mAudioOutputThread = NULL;
+        mAudioOutputThread = NULL;
     }
 }
 
@@ -1385,7 +1384,7 @@ void NTV2GstAV::AudioOutputThreadStatic (AJAThread * pThread, void * pContext)
 {
     (void) pThread;
 
-    NTV2GstAV *	pApp (reinterpret_cast <NTV2GstAV *> (pContext));
+    NTV2GstAV *    pApp (reinterpret_cast <NTV2GstAV *> (pContext));
     pApp->AudioOutputWorker ();
 }
 
@@ -1395,7 +1394,7 @@ void NTV2GstAV::AudioOutputWorker (void)
     while (!mGlobalQuit)
     {
         // wait for the next codec hevc frame
-        AjaAudioBuff *	pFrameData (mAudioInputCircularBuffer.StartConsumeNextBuffer ());
+        AjaAudioBuff *    pFrameData (mAudioInputCircularBuffer.StartConsumeNextBuffer ());
         if (pFrameData)
         {
             if (!mLastFrameAudioOut)
@@ -1448,10 +1447,10 @@ void NTV2GstAV::SetCallback(CallBackType cbType, NTV2Callback callback, void * c
 
 AjaVideoBuff* NTV2GstAV::AcquireVideoBuffer()
 {
-    AJAAutoLock	autoLock (mLock);
+    AJAAutoLock    autoLock (mLock);
     
     for (unsigned bufferNdx = 0; bufferNdx < VIDEO_ARRAY_SIZE; bufferNdx++ )
-	{
+    {
         if (mVideoOutBuffer[bufferNdx].bufferRef == 0)
         {
             mVideoOutBuffer[bufferNdx].bufferRef++;
@@ -1459,7 +1458,7 @@ AjaVideoBuff* NTV2GstAV::AcquireVideoBuffer()
 
             return &mVideoOutBuffer[bufferNdx];
         }
-	}
+    }
     printf("Error: could not find a video buffer\n");
     return NULL;
 }
@@ -1467,10 +1466,10 @@ AjaVideoBuff* NTV2GstAV::AcquireVideoBuffer()
 
 AjaAudioBuff* NTV2GstAV::AcquireAudioBuffer()
 {
-    AJAAutoLock	autoLock (mLock);
+    AJAAutoLock    autoLock (mLock);
 
     for (unsigned bufferNdx = 0; bufferNdx < AUDIO_ARRAY_SIZE; bufferNdx++ )
-	{
+    {
         if (mAudioOutBuffer[bufferNdx].bufferRef == 0)
         {
             mAudioOutBuffer[bufferNdx].bufferRef++;
@@ -1478,7 +1477,7 @@ AjaAudioBuff* NTV2GstAV::AcquireAudioBuffer()
 
             return &mAudioOutBuffer[bufferNdx];
         }
-	}
+    }
     printf("Error: could not find an audio buffer\n");
     return NULL;
 }
@@ -1486,7 +1485,7 @@ AjaAudioBuff* NTV2GstAV::AcquireAudioBuffer()
 
 void NTV2GstAV::ReleaseVideoBuffer(AjaVideoBuff * videoBuffer)
 {
-    AJAAutoLock	autoLock (mLock);
+    AJAAutoLock    autoLock (mLock);
 
     if (videoBuffer->bufferRef)
     {
@@ -1498,7 +1497,7 @@ void NTV2GstAV::ReleaseVideoBuffer(AjaVideoBuff * videoBuffer)
 
 void NTV2GstAV::ReleaseAudioBuffer(AjaAudioBuff * audioBuffer)
 {
-    AJAAutoLock	autoLock (mLock);
+    AJAAutoLock    autoLock (mLock);
 
     if (audioBuffer->bufferRef)
     {
@@ -1510,7 +1509,7 @@ void NTV2GstAV::ReleaseAudioBuffer(AjaAudioBuff * audioBuffer)
 
 void NTV2GstAV::AddRefVideoBuffer(AjaVideoBuff * videoBuffer)
 {
-    AJAAutoLock	autoLock (mLock);
+    AJAAutoLock    autoLock (mLock);
     videoBuffer->bufferRef++;
     //printf("add ref video buffer %d %d\n", videoBuffer->bufferId, videoBuffer->bufferRef);
 }
@@ -1518,7 +1517,7 @@ void NTV2GstAV::AddRefVideoBuffer(AjaVideoBuff * videoBuffer)
 
 void NTV2GstAV::AddRefAudioBuffer(AjaAudioBuff * audioBuffer)
 {
-    AJAAutoLock	autoLock (mLock);
+    AJAAutoLock    autoLock (mLock);
     audioBuffer->bufferRef++;
     //printf("add ref audio buffer %d %d\n", audioBuffer->bufferId, audioBuffer->bufferRef);
 }

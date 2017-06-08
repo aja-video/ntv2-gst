@@ -446,17 +446,17 @@ gst_aja_clock_get_internal_time (GstClock * clock)
 static gboolean
 aja_init (GstPlugin * plugin)
 {
- 	GST_DEBUG_CATEGORY_INIT (gst_aja_debug, "aja", 0, "debug category for aja plugin");
+     GST_DEBUG_CATEGORY_INIT (gst_aja_debug, "aja", 0, "debug category for aja plugin");
 
     memset (devices, 0x0, sizeof (devices));
 
-	gst_element_register (plugin, "ajavideosrc", GST_RANK_NONE, GST_TYPE_AJA_VIDEO_SRC);
+    gst_element_register (plugin, "ajavideosrc", GST_RANK_NONE, GST_TYPE_AJA_VIDEO_SRC);
   //  gst_element_register (plugin, "ajahevcsrc", GST_RANK_NONE, GST_TYPE_AJA_HEVC_SRC);
-  	gst_element_register (plugin, "ajaaudiosrc", GST_RANK_NONE, GST_TYPE_AJA_AUDIO_SRC);
+      gst_element_register (plugin, "ajaaudiosrc", GST_RANK_NONE, GST_TYPE_AJA_AUDIO_SRC);
 
     // These don't work yet so lets not register them
-  	//gst_element_register (plugin, "ajavideosink", GST_RANK_NONE, GST_TYPE_AJA_VIDEO_SINK);
-  	//gst_element_register (plugin, "ajaaudiosink", GST_RANK_NONE, GST_TYPE_AJA_AUDIO_SINK);
+      //gst_element_register (plugin, "ajavideosink", GST_RANK_NONE, GST_TYPE_AJA_VIDEO_SINK);
+      //gst_element_register (plugin, "ajaaudiosink", GST_RANK_NONE, GST_TYPE_AJA_AUDIO_SINK);
 
   return TRUE;
 }
