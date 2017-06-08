@@ -1108,7 +1108,7 @@ void NTV2GstAVHevc::VideoOutputWorker (void)
 
                     // Possible callbacks are not setup yet so make sure we release the buffer if
                     // no one is there to catch them
-                    if (!DoCallback(VIDEO_CALLBACK, (int64_t) pDstFrame))
+                    if (!DoCallback(VIDEO_CALLBACK, pDstFrame))
                         ReleaseVideoBuffer(pDstFrame);
                 }
                 
@@ -1337,7 +1337,7 @@ void NTV2GstAVHevc::HevcOutputWorker (void)
 
                     // Possible callbacks are not setup yet so make sure we release the buffer if
                     // no one is there to catch them
-                    if (!DoCallback(VIDEO_CALLBACK, (int64_t) pDstFrame))
+                    if (!DoCallback(VIDEO_CALLBACK, pDstFrame))
                         ReleaseVideoBuffer(pDstFrame);
                 }
 
@@ -1411,7 +1411,7 @@ void NTV2GstAVHevc::AudioOutputWorker (void)
 
                     // Possible callbacks are not setup yet so make sure we release the buffer if
                     // no one is there to catch them
-                    if (!DoCallback(AUDIO_CALLBACK, (int64_t) pDstFrame))
+                    if (!DoCallback(AUDIO_CALLBACK, pDstFrame))
                         ReleaseAudioBuffer(pDstFrame);
                 }
 
@@ -1431,7 +1431,7 @@ void NTV2GstAVHevc::AudioOutputWorker (void)
 }
 
 
-void NTV2GstAVHevc::SetCallback(CallBackType cbType, int64_t callback, int64_t callbackRefcon)
+void NTV2GstAVHevc::SetCallback(CallBackType cbType, NTV2Callback callback, void * callbackRefcon)
 {
     if (cbType == VIDEO_CALLBACK)
     {
@@ -1587,22 +1587,20 @@ AJA_FrameRate NTV2GstAVHevc::GetAJAFrameRate(NTV2FrameRate frameRate)
 }
 
 
-bool NTV2GstAVHevc::DoCallback(CallBackType type, int64_t msg)
+bool NTV2GstAVHevc::DoCallback(CallBackType type, void * msg)
 {
     if (type == VIDEO_CALLBACK)
     {
         if (mVideoCallback)
         {
-            NTV2Callback cb = (NTV2Callback) mVideoCallback;
-            return (*cb)(mVideoCallbackRefcon, msg);
+            return mVideoCallback(mVideoCallbackRefcon, msg);
         }
     }
     else if (type == AUDIO_CALLBACK)
     {
         if (mAudioCallback)
         {
-            NTV2Callback cb = (NTV2Callback) mAudioCallback;
-            return (*cb)(mAudioCallbackRefcon, msg);
+            return mAudioCallback(mAudioCallbackRefcon, msg);
         }
     }
     return false;

@@ -128,7 +128,7 @@ static gboolean gst_aja_audio_src_stop (GstAjaAudioSrc * src);
 
 static GstStateChangeReturn gst_aja_audio_src_change_state (GstElement * element, GstStateChange transition);
 
-static gboolean gst_aja_audio_src_audio_callback (int64_t refcon, int64_t msg);
+static bool gst_aja_audio_src_audio_callback (void * refcon, void * msg);
 
 #define parent_class gst_aja_audio_src_parent_class
 G_DEFINE_TYPE (GstAjaAudioSrc, gst_aja_audio_src, GST_TYPE_PUSH_SRC);
@@ -565,7 +565,7 @@ gst_aja_audio_src_change_state (GstElement * element, GstStateChange transition)
             g_mutex_lock (&src->input->lock);
             if (src->input->videosrc)
                 videosrc = GST_ELEMENT_CAST (gst_object_ref (src->input->videosrc));
-            src->input->ntv2AVHevc->SetCallback(AUDIO_CALLBACK, (int64_t)&gst_aja_audio_src_audio_callback, (int64_t)src);
+            src->input->ntv2AVHevc->SetCallback(AUDIO_CALLBACK, &gst_aja_audio_src_audio_callback, src);
             g_mutex_unlock (&src->input->lock);
             
             if (!videosrc)
@@ -845,17 +845,17 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     return flow_ret;
 }
 
-static gboolean
-gst_aja_audio_src_audio_callback(int64_t refcon, int64_t msg)
+static bool
+gst_aja_audio_src_audio_callback(void * refcon, void * msg)
 {
     GstAjaAudioSrc *src = (GstAjaAudioSrc *) refcon;
     AjaAudioBuff *audioBuffer = (AjaAudioBuff *) msg;
     
     if (src->input->audio_enabled == FALSE)
-        return FALSE;
+        return false;
     
     gst_aja_audio_src_got_packet(src, audioBuffer);
-    return TRUE;
+    return true;
 }
 
 

@@ -103,7 +103,7 @@ static void gst_aja_video_src_start_streams (GstElement * element);
 
 static GstStateChangeReturn gst_aja_video_src_change_state (GstElement * element, GstStateChange transition);
 
-static gboolean gst_aja_video_src_video_callback (int64_t refcon, int64_t msg);
+static bool gst_aja_video_src_video_callback (void * refcon, void * msg);
 
 #define parent_class gst_aja_video_src_parent_class
 G_DEFINE_TYPE (GstAjaVideoSrc, gst_aja_video_src, GST_TYPE_PUSH_SRC);
@@ -605,7 +605,7 @@ gst_aja_video_src_change_state (GstElement * element, GstStateChange transition)
             
         case GST_STATE_CHANGE_READY_TO_PAUSED:
             g_mutex_lock (&src->input->lock);
-            src->input->ntv2AVHevc->SetCallback(VIDEO_CALLBACK, (int64_t)&gst_aja_video_src_video_callback, (int64_t)src);
+            src->input->ntv2AVHevc->SetCallback(VIDEO_CALLBACK, &gst_aja_video_src_video_callback, src);
             g_mutex_unlock (&src->input->lock);
             src->flushing = FALSE;
             break;
@@ -949,16 +949,16 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     return flow_ret;
 }
 
-static gboolean
-gst_aja_video_src_video_callback(int64_t refcon, int64_t msg)
+static bool
+gst_aja_video_src_video_callback(void * refcon, void * msg)
 {
     GstAjaVideoSrc *src = (GstAjaVideoSrc *) refcon;
     AjaVideoBuff *videoBuffer = (AjaVideoBuff *) msg;
 
     if (src->input->video_enabled == FALSE)
-        return FALSE;
+        return false;
     
     gst_aja_video_src_got_frame(src, videoBuffer);
-    return TRUE;
+    return true;
 }
 

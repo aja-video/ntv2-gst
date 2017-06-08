@@ -29,7 +29,7 @@
 
 #define ASECOND                 (1000000000)
 
-typedef int64_t (*NTV2Callback) (int64_t refcon, int64_t msg);
+typedef bool (*NTV2Callback) (void * refcon, void * msg);
 
 typedef enum
 {
@@ -140,7 +140,7 @@ class NTV2GstAVHevc
         /**
             @brief	Set the callback and callback refcon.
         **/
-        virtual void            SetCallback(CallBackType cbType, int64_t callback, int64_t callbackRefcon);
+        virtual void            SetCallback(CallBackType cbType, NTV2Callback callback, void * callbackRefcon);
     
         /**
             @brief	Acquire video buffer (just finds the first free buffer in the pool)
@@ -337,7 +337,7 @@ class NTV2GstAVHevc
         AJAStatus DetermineInputFormat(NTV2Channel inputChannel, bool quad, NTV2VideoFormat& videoFormat);
         AJA_FrameRate GetAJAFrameRate(NTV2FrameRate frameRate);
 
-        bool DoCallback(CallBackType type, int64_t msg);
+        bool DoCallback(CallBackType type, void * msg);
 
     //	Private Member Data
 	private:
@@ -385,10 +385,10 @@ class NTV2GstAVHevc
         uint32_t                    mEncInfoBufferSize;     /// My encoded info buffer size (bytes)
         uint32_t					mAudioBufferSize;		///	My audio buffer size (bytes)
 
-        int64_t                     mVideoCallback;         /// Callback for video output
-        int64_t                     mVideoCallbackRefcon;   /// Callback refcon for video output
-        int64_t                     mAudioCallback;         /// Callback for HEVC output (compressed frames)
-        int64_t                     mAudioCallbackRefcon;   /// Callback refcon for AC output
+        NTV2Callback               mVideoCallback;         /// Callback for video output
+        void *                     mVideoCallbackRefcon;   /// Callback refcon for video output
+        NTV2Callback               mAudioCallback;         /// Callback for HEVC output (compressed frames)
+        void *                     mAudioCallbackRefcon;   /// Callback refcon for AC output
 
         AjaVideoBuff							mACInputBuffer [VIDEO_RING_SIZE];           ///	My AC input buffers
         AJACircularBuffer <AjaVideoBuff *>      mACInputCircularBuffer;                     ///	My AC input ring
