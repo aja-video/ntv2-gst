@@ -18,11 +18,8 @@
 NTV2GstAV::NTV2GstAV (const string inDeviceSpecifier, const NTV2Channel inChannel)
 
 :    mACInputThread          (NULL),
-    mVideoOutputThread        (NULL),
     mCodecRawThread            (NULL),
     mCodecHevcThread        (NULL),
-    mHevcOutputThread         (NULL),
-    mAudioOutputThread         (NULL),
     mM31                    (NULL),
     mLock                   (new AJALock),
     mDeviceID                (DEVICE_ID_NOTFOUND),
@@ -54,9 +51,9 @@ NTV2GstAV::NTV2GstAV (const string inDeviceSpecifier, const NTV2Channel inChanne
     mAudioOutFrameCount     (0)
 
 {
-    ::memset (mACInputBuffer,       0x0, sizeof (mACInputBuffer));
-    ::memset (mVideoHevcBuffer,     0x0, sizeof (mVideoHevcBuffer));
-    ::memset (mAudioInputBuffer,    0x0, sizeof (mAudioInputBuffer));
+    ::memset (mHevcInputBuffer, 0x0, sizeof (mHevcInputBuffer));
+    ::memset (mVideoOutBuffer, 0x0, sizeof (mVideoOutBuffer));
+    ::memset (mAudioOutBuffer, 0x0, sizeof (mAudioOutBuffer));
 
 }    //    constructor
 
@@ -299,10 +296,8 @@ void NTV2GstAV::Quit (void)
     mStarted = false;
 
     StopACThread();
-    StopVideoOutputThread();
     StopCodecRawThread();
     StopCodecHevcThread();
-    StopAudioOutputThread();
     FreeHostBuffers();
 
     //  Stop video capture
@@ -639,48 +634,22 @@ void NTV2GstAV::SetupHostBuffers (void)
     mEncInfoBufferSize = sizeof(HevcEncodedInfo)*2;
     mAudioBufferSize = NTV2_AUDIOSIZE_MAX;
 
-    // video input ring
-    mACInputCircularBuffer.SetAbortFlag (&mGlobalQuit);
-    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++ )
-    {
-        memset (&mACInputBuffer[bufferNdx], 0, sizeof(AjaVideoBuff));
-        mACInputBuffer[bufferNdx].pVideoBuffer        = new uint32_t [mVideoBufferSize/4];
-        mACInputBuffer[bufferNdx].videoBufferSize    = mVideoBufferSize;
-        mACInputBuffer[bufferNdx].videoDataSize        = 0;
-        mACInputBuffer[bufferNdx].pInfoBuffer        = new uint32_t [mPicInfoBufferSize/4];
-        mACInputBuffer[bufferNdx].infoBufferSize    = mPicInfoBufferSize;
-        mACInputBuffer[bufferNdx].infoDataSize        = 0;
-        mACInputCircularBuffer.Add (& mACInputBuffer[bufferNdx]);
-    }
-    
-    // audio input ring
-    mAudioInputCircularBuffer.SetAbortFlag (&mGlobalQuit);
-    for (unsigned bufferNdx = 0; bufferNdx < AUDIO_RING_SIZE; bufferNdx++ )
-    {
-        memset (&mAudioInputBuffer[bufferNdx], 0, sizeof(AjaAudioBuff));
-        mAudioInputBuffer[bufferNdx].pAudioBuffer        = new uint32_t [mAudioBufferSize/4];
-        mAudioInputBuffer[bufferNdx].audioBufferSize    = mAudioBufferSize;
-        mAudioInputBuffer[bufferNdx].audioDataSize        = 0;
-        mAudioInputCircularBuffer.Add (& mAudioInputBuffer[bufferNdx]);
-    }
-
     if (mHevcOutput)
     {
-        // video hevc ring
-        mVideoHevcCircularBuffer.SetAbortFlag (&mGlobalQuit);
+        mHevcInputCircularBuffer.SetAbortFlag (&mGlobalQuit);
         for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++ )
         {
-            memset (&mVideoHevcBuffer[bufferNdx], 0, sizeof(AjaVideoBuff));
-            mVideoHevcBuffer[bufferNdx].pVideoBuffer    = new uint32_t [mVideoBufferSize/4];
-            mVideoHevcBuffer[bufferNdx].videoBufferSize    = mVideoBufferSize;
-            mVideoHevcBuffer[bufferNdx].videoDataSize    = 0;
-            mVideoHevcBuffer[bufferNdx].pInfoBuffer        = new uint32_t [mEncInfoBufferSize/4];
-            mVideoHevcBuffer[bufferNdx].infoBufferSize   = mEncInfoBufferSize;
-            mVideoHevcBuffer[bufferNdx].infoDataSize        = 0;
-            mVideoHevcCircularBuffer.Add (& mVideoHevcBuffer[bufferNdx]);
+            memset (&mHevcInputBuffer[bufferNdx], 0, sizeof(AjaVideoBuff));
+            mHevcInputBuffer[bufferNdx].pVideoBuffer        = new uint32_t [mVideoBufferSize/4];
+            mHevcInputBuffer[bufferNdx].videoBufferSize    = mVideoBufferSize;
+            mHevcInputBuffer[bufferNdx].videoDataSize        = 0;
+            mHevcInputBuffer[bufferNdx].pInfoBuffer        = new uint32_t [mPicInfoBufferSize/4];
+            mHevcInputBuffer[bufferNdx].infoBufferSize    = mPicInfoBufferSize;
+            mHevcInputBuffer[bufferNdx].infoDataSize        = 0;
+            mHevcInputCircularBuffer.Add (& mHevcInputBuffer[bufferNdx]);
         }
     }
-    
+
     // These video buffers are actually passed out of this class so we need to assign them unique numbers
     // so they can be tracked and also they have a state
     for (unsigned bufferNdx = 0; bufferNdx < VIDEO_ARRAY_SIZE; bufferNdx++ )
@@ -691,8 +660,16 @@ void NTV2GstAV::SetupHostBuffers (void)
         mVideoOutBuffer[bufferNdx].pVideoBuffer        = new uint32_t [mVideoBufferSize/4];
         mVideoOutBuffer[bufferNdx].videoBufferSize    = mVideoBufferSize;
         mVideoOutBuffer[bufferNdx].videoDataSize    = 0;
-        mVideoOutBuffer[bufferNdx].pInfoBuffer        = new uint32_t [mPicInfoBufferSize/4];
-        mVideoOutBuffer[bufferNdx].infoBufferSize   = mPicInfoBufferSize;
+        if (mHevcOutput)
+        {
+            mVideoOutBuffer[bufferNdx].pInfoBuffer        = new uint32_t [mEncInfoBufferSize/4];
+            mVideoOutBuffer[bufferNdx].infoBufferSize   = mEncInfoBufferSize;
+        }
+        else
+        {
+            mVideoOutBuffer[bufferNdx].pInfoBuffer        = new uint32_t [mPicInfoBufferSize/4];
+            mVideoOutBuffer[bufferNdx].infoBufferSize   = mPicInfoBufferSize;
+        }
         mVideoOutBuffer[bufferNdx].infoDataSize        = 0;
     }
 
@@ -712,44 +689,22 @@ void NTV2GstAV::SetupHostBuffers (void)
 
 void NTV2GstAV::FreeHostBuffers (void)
 {
-    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++)
-    {
-        if (mACInputBuffer[bufferNdx].pVideoBuffer)
-        {
-            delete [] mACInputBuffer[bufferNdx].pVideoBuffer;
-            mACInputBuffer[bufferNdx].pVideoBuffer = NULL;
-        }
-        if (mACInputBuffer[bufferNdx].pInfoBuffer)
-        {
-            delete [] mACInputBuffer[bufferNdx].pInfoBuffer;
-            mACInputBuffer[bufferNdx].pInfoBuffer = NULL;
-        }
-    }
-
-    for (unsigned bufferNdx = 0; bufferNdx < AUDIO_RING_SIZE; bufferNdx++)
-    {
-        if (mAudioInputBuffer[bufferNdx].pAudioBuffer)
-        {
-            delete [] mAudioInputBuffer[bufferNdx].pAudioBuffer;
-            mAudioInputBuffer[bufferNdx].pAudioBuffer = NULL;
-        }
-    }
-
     if (mHevcOutput)
     {
         for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++)
         {
-            if (mVideoHevcBuffer[bufferNdx].pVideoBuffer)
+            if (mHevcInputBuffer[bufferNdx].pVideoBuffer)
             {
-                delete [] mVideoHevcBuffer[bufferNdx].pVideoBuffer;
-                mVideoHevcBuffer[bufferNdx].pVideoBuffer = NULL;
+                delete [] mHevcInputBuffer[bufferNdx].pVideoBuffer;
+                mHevcInputBuffer[bufferNdx].pVideoBuffer = NULL;
             }
-            if (mVideoHevcBuffer[bufferNdx].pInfoBuffer)
+            if (mHevcInputBuffer[bufferNdx].pInfoBuffer)
             {
-                delete [] mVideoHevcBuffer[bufferNdx].pInfoBuffer;
-                mVideoHevcBuffer[bufferNdx].pInfoBuffer = NULL;
+                delete [] mHevcInputBuffer[bufferNdx].pInfoBuffer;
+                mHevcInputBuffer[bufferNdx].pInfoBuffer = NULL;
             }
         }
+        mHevcInputCircularBuffer.Clear ();
     }
 
     for (unsigned bufferNdx = 0; bufferNdx < VIDEO_ARRAY_SIZE; bufferNdx++)
@@ -875,18 +830,11 @@ AJAStatus NTV2GstAV::Run ()
     // always start the AC thread
     StartACThread ();
     
-    // if not doing hevc output then just start the video output thread otherwise start the hevc threads
-    if (!mHevcOutput)
-    {
-        StartVideoOutputThread ();
-        StartAudioOutputThread ();
-    }
-    else
+    // if doing hevc output then start the hevc threads
+    if (mHevcOutput)
     {
         StartCodecRawThread ();
         StartCodecHevcThread ();
-        StartHevcOutputThread ();
-        StartAudioOutputThread ();
     }
     
     mStarted = true;
@@ -944,92 +892,105 @@ void NTV2GstAV::ACInputWorker (void)
             // At this point, there's at least one fully-formed frame available in the device's
             // frame buffer to transfer to the host. Reserve an AvaDataBuffer to "produce", and
             // use it in the next transfer from the device...
-            AjaVideoBuff *    pVideoData    (mACInputCircularBuffer.StartProduceNextBuffer ());
-            if (pVideoData)
+            AjaVideoBuff *    pVideoData    (mHevcOutput ? mHevcInputCircularBuffer.StartProduceNextBuffer () : AcquireVideoBuffer());
+
+            mInputTransferStruct.SetVideoBuffer(pVideoData->pVideoBuffer, pVideoData->videoBufferSize);
+
+            AjaAudioBuff *    pAudioData = AcquireAudioBuffer();
+            mInputTransferStruct.SetAudioBuffer(pAudioData->pAudioBuffer, pAudioData->audioBufferSize);
+
+            // do the transfer from the device into our host AvaDataBuffer...
+            mDevice.AutoCirculateTransfer (mInputChannel, mInputTransferStruct);
+
+            // get the video data size
+            pVideoData->videoDataSize = pVideoData->videoBufferSize;
+            pVideoData->lastFrame = mLastFrame;
+
+            // get the audio data size
+            pAudioData->audioDataSize = mInputTransferStruct.acTransferStatus.acAudioTransferSize;
+            pAudioData->lastFrame = mLastFrame;
+
+            // FIXME: this should actually use acAudioClockTimeStamp but
+            // it does not actually seem to be based on a 48kHz clock
+            pVideoData->timeStamp = mInputTransferStruct.acTransferStatus.acFrameStamp.acFrameTime;
+            pAudioData->timeStamp = mInputTransferStruct.acTransferStatus.acFrameStamp.acFrameTime;
+
+            pVideoData->frameNumber = mVideoInputFrameCount;
+            pAudioData->frameNumber = mVideoInputFrameCount;
+
+            if (mWithAnc)
             {
-                // TODO: Use a GstBufferPool for audio/video here instead
-                // setup buffer pointers for transfer
-                mInputTransferStruct.SetVideoBuffer(pVideoData->pVideoBuffer, pVideoData->videoBufferSize);
-                mInputTransferStruct.SetAudioBuffer(NULL, 0);
-
-                AjaAudioBuff *    pAudioData = NULL;
-                pAudioData = mAudioInputCircularBuffer.StartProduceNextBuffer ();
-                if (pAudioData)
-                {
-                    mInputTransferStruct.SetAudioBuffer(pAudioData->pAudioBuffer, pAudioData->audioBufferSize);
+                NTV2_RP188 timeCode;
+                if (mInputTransferStruct.acTransferStatus.acFrameStamp.GetInputTimeCode(timeCode)) {
+                  // get the sdi input anc data
+                  pVideoData->timeCodeDBB = timeCode.fDBB;
+                  pVideoData->timeCodeLow = timeCode.fLo;
+                  pVideoData->timeCodeHigh = timeCode.fHi;
                 }
+            }
 
-                // do the transfer from the device into our host AvaDataBuffer...
-                mDevice.AutoCirculateTransfer (mInputChannel, mInputTransferStruct);
+            if (mWithInfo)
+            {
+                // get picture and additional data pointers
+                HevcPictureInfo * pInfo = (HevcPictureInfo*)pVideoData->pInfoBuffer;
+                HevcPictureData * pPicData = &pInfo->pictureData;
 
-                // get the video data size
-                pVideoData->videoDataSize = pVideoData->videoBufferSize;
-                pVideoData->lastFrame = mLastFrame;
+                // initialize info buffer to 0
+                memset(pInfo, 0, pVideoData->infoBufferSize);
 
-                // get the audio data size
-                pAudioData->audioDataSize = mInputTransferStruct.acTransferStatus.acAudioTransferSize;
-                pAudioData->lastFrame = mLastFrame;
+                // calculate pts based on 90 Khz clock tick
+                uint64_t pts = (uint64_t)mTimeBase.FramesToMicroseconds(mVideoInputFrameCount)*90000/1000000;
 
-                // FIXME: this should actually use acAudioClockTimeStamp but
-                // it does not actually seem to be based on a 48kHz clock
-                pVideoData->timeStamp = mInputTransferStruct.acTransferStatus.acFrameStamp.acFrameTime;
-                pAudioData->timeStamp = mInputTransferStruct.acTransferStatus.acFrameStamp.acFrameTime;
+                // set serial number, pts and picture number
+                pPicData->serialNumber = mVideoInputFrameCount;         // can be anything
+                pPicData->ptsValueLow = (uint32_t)(pts & 0xffffffff);
+                pPicData->ptsValueHigh = (uint32_t)(pts >> 32);
+                pPicData->pictureNumber = mVideoInputFrameCount + 1;    // must count starting with 1
 
-                pVideoData->frameNumber = mVideoInputFrameCount;
-                pAudioData->frameNumber = mVideoInputFrameCount;
+                // set info data size
+                pVideoData->infoDataSize = sizeof(HevcPictureData);
+            }
 
-                if (mWithAnc)
-                {
-                    NTV2_RP188 timeCode;
-                    if (mInputTransferStruct.acTransferStatus.acFrameStamp.GetInputTimeCode(timeCode)) {
-                      // get the sdi input anc data
-                      pVideoData->timeCodeDBB = timeCode.fDBB;
-                      pVideoData->timeCodeLow = timeCode.fLo;
-                      pVideoData->timeCodeHigh = timeCode.fHi;
-                    }
-                }
+            if(pVideoData->lastFrame && !mLastFrameInput)
+            {
+                GST_INFO ("Capture last frame number %d", mVideoInputFrameCount);
+                mLastFrameInput = true;
+            }
 
-                if (mWithInfo)
-                {
-                    // get picture and additional data pointers
-                    HevcPictureInfo * pInfo = (HevcPictureInfo*)pVideoData->pInfoBuffer;
-                    HevcPictureData * pPicData = &pInfo->pictureData;
+            mVideoInputFrameCount++;
 
-                    // initialize info buffer to 0
-                    memset(pInfo, 0, pVideoData->infoBufferSize);
+            if (mHevcOutput)
+            {
+                mHevcInputCircularBuffer.EndProduceNextBuffer ();
+            }
+            else
+            {
+              // Possible callbacks are not setup yet so make sure we release the buffer if
+              // no one is there to catch them
+              if (!DoCallback(VIDEO_CALLBACK, pVideoData))
+                  ReleaseVideoBuffer(pVideoData);
 
-                    // calculate pts based on 90 Khz clock tick
-                    uint64_t pts = (uint64_t)mTimeBase.FramesToMicroseconds(mVideoInputFrameCount)*90000/1000000;
 
-                    // set serial number, pts and picture number
-                    pPicData->serialNumber = mVideoInputFrameCount;         // can be anything
-                    pPicData->ptsValueLow = (uint32_t)(pts & 0xffffffff);
-                    pPicData->ptsValueHigh = (uint32_t)(pts >> 32);
-                    pPicData->pictureNumber = mVideoInputFrameCount + 1;    // must count starting with 1
+              if (pVideoData->lastFrame)
+              {
+                  GST_INFO ("Video out last frame number %d", mVideoOutFrameCount);
+                  mLastFrameVideoOut = true;
+              }
 
-                    // set info data size
-                    pVideoData->infoDataSize = sizeof(HevcPictureData);
-                }
+              mVideoOutFrameCount++;
+            }
 
-                if(pVideoData->lastFrame && !mLastFrameInput)
-                {
-                    GST_INFO ("Capture last frame number %d", mVideoInputFrameCount);
-                    mLastFrameInput = true;
-                }
+            // Possible callbacks are not setup yet so make sure we release the buffer if
+            // no one is there to catch them
+            if (!DoCallback(AUDIO_CALLBACK, pAudioData))
+                ReleaseAudioBuffer(pAudioData);
 
-                mVideoInputFrameCount++;
-
-                // signal that we're done "producing" the frame, making it available for future "consumption"...
-                if (pAudioData)
-                {
-                    mAudioInputCircularBuffer.EndProduceNextBuffer ();
-                }
-
-                if (pVideoData)
-                {
-                    mACInputCircularBuffer.EndProduceNextBuffer ();
-                }
-            }    // if A/C running and frame(s) are available for transfer
+            if (pAudioData->lastFrame)
+            {
+                GST_INFO ("Audio out last frame number %d", mAudioOutFrameCount);
+                mLastFrameAudioOut = true;
+            }
+            mAudioOutFrameCount++;
         }
         else
         {
@@ -1043,90 +1004,6 @@ void NTV2GstAV::ACInputWorker (void)
     // Stop AutoCirculate...
     mDevice.AutoCirculateStop (mInputChannel);
 }
-
-
-// This is where we start the video output thread
-void NTV2GstAV::StartVideoOutputThread (void)
-{
-    mVideoOutputThread = new AJAThread ();
-    mVideoOutputThread->Attach (VideoOutputThreadStatic, this);
-    mVideoOutputThread->SetPriority (AJA_ThreadPriority_High);
-    mVideoOutputThread->Start ();
-}
-
-// This is where we stop the video output thread
-void NTV2GstAV::StopVideoOutputThread (void)
-{
-    if (mVideoOutputThread)
-    {
-        while (mVideoOutputThread->Active ())
-            AJATime::Sleep (10);
-        
-        delete mVideoOutputThread;
-        mVideoOutputThread = NULL;
-    }
-}
-
-
-// The video output static callback
-void NTV2GstAV::VideoOutputThreadStatic (AJAThread * pThread, void * pContext)
-{
-    (void) pThread;
-
-    NTV2GstAV *    pApp (reinterpret_cast <NTV2GstAV *> (pContext));
-    pApp->VideoOutputWorker ();
-}
-
-
-void NTV2GstAV::VideoOutputWorker (void)
-{
-    while (!mGlobalQuit)
-    {
-        // wait for the next video input buffer
-        AjaVideoBuff *    pFrameData (mACInputCircularBuffer.StartConsumeNextBuffer ());
-        if (pFrameData)
-        {
-            if (!mLastFrameVideoOut)
-            {
-                AjaVideoBuff * pDstFrame = AcquireVideoBuffer();
-                if (pDstFrame)
-                {
-                    memcpy(pDstFrame->pVideoBuffer, pFrameData->pVideoBuffer, pFrameData->videoDataSize);
-                    pDstFrame->frameNumber = pFrameData->frameNumber;
-                    pDstFrame->videoDataSize = pFrameData->videoDataSize;
-                    pDstFrame->timeCodeDBB = pFrameData->timeCodeDBB;
-                    pDstFrame->timeCodeLow = pFrameData->timeCodeLow;
-                    pDstFrame->timeCodeHigh = pFrameData->timeCodeHigh;
-                    pDstFrame->timeStamp = pFrameData->timeStamp;
-                    pDstFrame->lastFrame = pFrameData->lastFrame;
-                    if (mWithInfo)
-                    {
-                        memcpy(pDstFrame->pInfoBuffer, pFrameData->pInfoBuffer, pFrameData->infoDataSize);
-                        pDstFrame->infoDataSize = pFrameData->infoDataSize;
-                    }
-
-                    // Possible callbacks are not setup yet so make sure we release the buffer if
-                    // no one is there to catch them
-                    if (!DoCallback(VIDEO_CALLBACK, pDstFrame))
-                        ReleaseVideoBuffer(pDstFrame);
-                }
-                
-                if (pFrameData->lastFrame)
-                {
-                    GST_INFO ("Video out last frame number %d", mVideoOutFrameCount);
-                    mLastFrameVideoOut = true;
-                }
-                
-                mVideoOutFrameCount++;
-            }
-            
-            // release the video input buffer
-            mACInputCircularBuffer.EndConsumeNextBuffer ();
-
-        }
-    }    // loop til quit signaled
-}
-
 
 // This is where we start the codec raw thread
 void NTV2GstAV::StartCodecRawThread (void)
@@ -1167,7 +1044,7 @@ void NTV2GstAV::CodecRawWorker (void)
     while (!mGlobalQuit)
     {
         // wait for the next raw video frame
-        AjaVideoBuff *    pFrameData (mACInputCircularBuffer.StartConsumeNextBuffer ());
+        AjaVideoBuff *    pFrameData (mHevcInputCircularBuffer.StartConsumeNextBuffer ());
         if (pFrameData)
         {
             if (!mLastFrameVideoOut)
@@ -1198,7 +1075,7 @@ void NTV2GstAV::CodecRawWorker (void)
             }
 
             // release the raw video frame
-            mACInputCircularBuffer.EndConsumeNextBuffer ();
+            mHevcInputCircularBuffer.EndConsumeNextBuffer ();
         }
     }  // loop til quit signaled
 }
@@ -1241,194 +1118,46 @@ void NTV2GstAV::CodecHevcWorker (void)
 {
     while (!mGlobalQuit)
     {
-        // wait for the next hevc frame 
-        AjaVideoBuff *    pFrameData (mVideoHevcCircularBuffer.StartProduceNextBuffer ());
-        if (pFrameData)
+
+        if (!mLastFrameHevcOut)
         {
-            if (!mLastFrameHevc)
+            AjaVideoBuff * pDstFrame = AcquireVideoBuffer();
+            if (pDstFrame)
             {
+
                 // transfer an hevc frame from the codec including encoded information
                 mM31->EncTransfer(mEncodeChannel,
-                                  (uint8_t*)pFrameData->pVideoBuffer,
-                                  pFrameData->videoBufferSize,
-                                  (uint8_t*)pFrameData->pInfoBuffer,
-                                  pFrameData->infoBufferSize,
-                                  pFrameData->videoDataSize,
-                                  pFrameData->infoDataSize,
-                                  pFrameData->lastFrame);
+                                  (uint8_t*)pDstFrame->pVideoBuffer,
+                                  pDstFrame->videoBufferSize,
+                                  (uint8_t*)pDstFrame->pInfoBuffer,
+                                  pDstFrame->infoBufferSize,
+                                  pDstFrame->videoDataSize,
+                                  pDstFrame->infoDataSize,
+                                  pDstFrame->lastFrame);
 
-                if (pFrameData->lastFrame)
-                {
-                    mLastFrameHevc = true;
-                }
+                // FIXME: these are not passed properly from AC thread to here
+                // pDstFrame->frameNumber = pFrameData->frameNumber;
+                // pDstFrame->timeCodeDBB = pFrameData->timeCodeDBB;
+                // pDstFrame->timeCodeLow = pFrameData->timeCodeLow;
+                // pDstFrame->timeCodeHigh = pFrameData->timeCodeHigh;
+                // pDstFrame->timeStamp = pFrameData->timeStamp;
 
-                mCodecHevcFrameCount++;
+                // Possible callbacks are not setup yet so make sure we release the buffer if
+                // no one is there to catch them
+                if (!DoCallback(VIDEO_CALLBACK, pDstFrame))
+                    ReleaseVideoBuffer(pDstFrame);
             }
 
-            // release and recycle the buffer...
-            mVideoHevcCircularBuffer.EndProduceNextBuffer ();
+            if (pDstFrame->lastFrame)
+            {
+                GST_INFO ("Hevc out last frame number %d", mHevcOutFrameCount);
+                mLastFrameHevcOut = true;
+            }
+
+            mHevcOutFrameCount++;
         }
     }    //    loop til quit signaled
 }
-
-
-// This is where we start the Hevc output thread
-void NTV2GstAV::StartHevcOutputThread (void)
-{
-    mHevcOutputThread = new AJAThread ();
-    mHevcOutputThread->Attach (HevcOutputThreadStatic, this);
-    mHevcOutputThread->SetPriority (AJA_ThreadPriority_High);
-    mHevcOutputThread->Start ();
-}
-
-
-// This is where we stop the Hevc output thread
-void NTV2GstAV::StopHevcOutputThread (void)
-{
-    if (mHevcOutputThread)
-    {
-        while (mHevcOutputThread->Active ())
-            AJATime::Sleep (10);
-        
-        delete mHevcOutputThread;
-        mHevcOutputThread = NULL;
-    }
-}
-
-
-// The Hevc output static callback
-void NTV2GstAV::HevcOutputThreadStatic (AJAThread * pThread, void * pContext)
-{
-    (void) pThread;
-
-    NTV2GstAV *    pApp (reinterpret_cast <NTV2GstAV *> (pContext));
-    pApp->HevcOutputWorker ();
-
-} // HevcOutputThreadStatic
-
-
-void NTV2GstAV::HevcOutputWorker (void)
-{
-    while (!mGlobalQuit)
-    {
-        // wait for the next video input buffer
-        AjaVideoBuff *    pFrameData (mVideoHevcCircularBuffer.StartConsumeNextBuffer ());
-        if (pFrameData)
-        {
-            if (!mLastFrameHevcOut)
-            {
-                AjaVideoBuff * pDstFrame = AcquireVideoBuffer();
-                if (pDstFrame)
-                {
-                    memcpy(pDstFrame->pVideoBuffer, pFrameData->pVideoBuffer, pFrameData->videoDataSize);
-                    pDstFrame->frameNumber = pFrameData->frameNumber;
-                    pDstFrame->videoDataSize = pFrameData->videoDataSize;
-                    pDstFrame->timeCodeDBB = pFrameData->timeCodeDBB;
-                    pDstFrame->timeCodeLow = pFrameData->timeCodeLow;
-                    pDstFrame->timeCodeHigh = pFrameData->timeCodeHigh;
-                    pDstFrame->timeStamp = pFrameData->timeStamp;
-                    pDstFrame->lastFrame = pFrameData->lastFrame;
-                    if (mWithInfo)
-                    {
-                        memcpy(pDstFrame->pInfoBuffer, pFrameData->pInfoBuffer, pFrameData->infoDataSize);
-                        pDstFrame->infoDataSize = pFrameData->infoDataSize;
-                    }
-
-                    // Possible callbacks are not setup yet so make sure we release the buffer if
-                    // no one is there to catch them
-                    if (!DoCallback(VIDEO_CALLBACK, pDstFrame))
-                        ReleaseVideoBuffer(pDstFrame);
-                }
-
-                if (pFrameData->lastFrame)
-                {
-                    GST_INFO ("Hevc out last frame number %d", mHevcOutFrameCount);
-                    mLastFrameHevcOut = true;
-                }
-
-                mHevcOutFrameCount++;
-            }
-            // release the video input buffer
-            mVideoHevcCircularBuffer.EndConsumeNextBuffer ();
-        }
-    }    // loop til quit signaled
-}
-
-
-// This is where we start the audio output thread
-void NTV2GstAV::StartAudioOutputThread (void)
-{
-    mAudioOutputThread = new AJAThread ();
-    mAudioOutputThread->Attach (AudioOutputThreadStatic, this);
-    mAudioOutputThread->SetPriority (AJA_ThreadPriority_High);
-    mAudioOutputThread->Start ();
-}
-
-
-// This is where we stop the audio output thread
-void NTV2GstAV::StopAudioOutputThread (void)
-{
-    if (mAudioOutputThread)
-    {
-        while (mAudioOutputThread->Active ())
-            AJATime::Sleep (10);
-        
-        delete mAudioOutputThread;
-        mAudioOutputThread = NULL;
-    }
-}
-
-
-// The audio output static callback
-void NTV2GstAV::AudioOutputThreadStatic (AJAThread * pThread, void * pContext)
-{
-    (void) pThread;
-
-    NTV2GstAV *    pApp (reinterpret_cast <NTV2GstAV *> (pContext));
-    pApp->AudioOutputWorker ();
-}
-
-
-void NTV2GstAV::AudioOutputWorker (void)
-{
-    while (!mGlobalQuit)
-    {
-        // wait for the next codec hevc frame
-        AjaAudioBuff *    pFrameData (mAudioInputCircularBuffer.StartConsumeNextBuffer ());
-        if (pFrameData)
-        {
-            if (!mLastFrameAudioOut)
-            {
-                AjaAudioBuff * pDstFrame = AcquireAudioBuffer();
-                if (pDstFrame)
-                {
-                    memcpy(pDstFrame->pAudioBuffer, pFrameData->pAudioBuffer, pFrameData->audioDataSize);
-                    pDstFrame->audioDataSize = pFrameData->audioDataSize;
-                    pDstFrame->frameNumber = pFrameData->frameNumber;
-                    pDstFrame->timeStamp = pFrameData->timeStamp;
-                    pDstFrame->lastFrame = pFrameData->lastFrame;
-
-                    // Possible callbacks are not setup yet so make sure we release the buffer if
-                    // no one is there to catch them
-                    if (!DoCallback(AUDIO_CALLBACK, pDstFrame))
-                        ReleaseAudioBuffer(pDstFrame);
-                }
-
-                if (pFrameData->lastFrame)
-                {
-                    GST_INFO ("Audio out last frame number %d", mAudioOutFrameCount);
-                    mLastFrameAudioOut = true;
-                }
-
-                mAudioOutFrameCount++;
-
-                // release the hevc buffer
-                mAudioInputCircularBuffer.EndConsumeNextBuffer ();
-            }
-        }
-    } // loop til quit signaled
-}
-
 
 void NTV2GstAV::SetCallback(CallBackType cbType, NTV2Callback callback, void * callbackRefcon)
 {

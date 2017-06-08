@@ -42,7 +42,7 @@ typedef struct
     uint32_t        bufferId;               /// Unique buffer number to identify buffer when it come back to us to be freed
     uint32_t        bufferRef;              /// Buffer use counter
     uint32_t        frameNumber;            /// Frame number
-    uint32_t *        pVideoBuffer;            ///    Pointer to host video buffer
+    uint32_t *      pVideoBuffer;            ///    Pointer to host video buffer
     uint32_t        videoBufferSize;        ///    Size of host video buffer (bytes)
     uint32_t        videoDataSize;            ///    Size of video data (bytes)
     uint32_t *      pInfoBuffer;            /// Picture information (raw) or encode information (hevc)
@@ -61,7 +61,7 @@ typedef struct
     uint32_t        bufferId;               /// Unique buffer number to identify buffer when it come back to us to be freed
     uint32_t        bufferRef;              /// Buffer use counter
     uint32_t        frameNumber;            /// Frame number
-    uint32_t *        pAudioBuffer;            ///    Pointer to host audio buffer
+    uint32_t *      pAudioBuffer;            ///    Pointer to host audio buffer
     uint32_t        audioBufferSize;        ///    Size of host audio buffer (bytes)
     uint32_t        audioDataSize;            ///    Size of audio data (bytes)
     uint64_t        timeStamp;              /// Time stamp of video data
@@ -218,12 +218,6 @@ class NTV2GstAV
         virtual void            StopACThread (void);
 
         /**
-            @brief    Start the video output thread.
-        **/
-        virtual void            StartVideoOutputThread (void);
-        virtual void            StopVideoOutputThread (void);
-
-        /**
             @brief    Start the codec raw thread.  
         **/
         virtual void            StartCodecRawThread (void);
@@ -236,28 +230,10 @@ class NTV2GstAV
         virtual void            StopCodecHevcThread (void);
 
         /**
-            @brief    Start the hevc output thread.
-        **/
-        virtual void            StartHevcOutputThread (void);
-        virtual void            StopHevcOutputThread (void);
-
-        /**
-            @brief    Start the audio output thread.
-        **/
-        virtual void            StartAudioOutputThread (void);
-        virtual void            StopAudioOutputThread (void);
-
-        /**
-            @brief    Repeatedly captures video frames using AutoCirculate and add them to
-                    the video input ring.
+            @brief    Repeatedly captures video frames using AutoCirculate and sends them to the raw
+                      audio/video consumers, or the HEVC worker threads
         **/
         virtual void            ACInputWorker (void);
-
-        /**
-            @brief    Repeatedly removes video frames from the video input ring, calls a
-                    custom video process method and adds the result to the raw video ring.
-        **/
-        virtual void            VideoOutputWorker (void);
 
         /**
             @brief    Repeatedly removes video frames from the raw video ring and transfers
@@ -266,22 +242,9 @@ class NTV2GstAV
         virtual void            CodecRawWorker (void);
 
         /**
-            @brief    Repeatedly transfers hevc frames from the codec and adds them to the
-                    hevc ring.
+            @brief    Repeatedly transfers hevc frames from the codec and sends them to the consumer.
         **/
         virtual void            CodecHevcWorker (void);
-
-        /**
-            @brief    Repeatedly removes hevc frame from the hevc ring and writes them to the
-                    hevc output file.
-        **/
-        virtual void            HevcOutputWorker (void);
-
-        /**
-            @brief    Repeatedly removes audio samples from the audio input ring and writes them to the
-                    audio output file.
-        **/
-        virtual void            AudioOutputWorker (void);
 
         //    Protected Class Methods
     protected:
@@ -292,14 +255,6 @@ class NTV2GstAV
             @param[in]    pContext    Context information to pass to the thread.
         **/
         static void                ACInputThreadStatic (AJAThread * pThread, void * pContext);
-
-        /**
-            @brief    This is the video process thread's static callback function that gets called when the thread starts.
-                    This function gets "Attached" to the consumer thread's AJAThread instance.
-            @param[in]    pThread        A valid pointer to the consumer thread's AJAThread instance.
-            @param[in]    pContext    Context information to pass to the thread.
-        **/
-        static void                VideoOutputThreadStatic (AJAThread * pThread, void * pContext);
 
         /**
             @brief    This is the codec raw thread's static callback function that gets called when the thread starts.
@@ -317,21 +272,6 @@ class NTV2GstAV
         **/
         static void                CodecHevcThreadStatic (AJAThread * pThread, void * pContext);
 
-        /**
-            @brief    This is the video file writer thread's static callback function that gets called when the thread starts.
-                    This function gets "Attached" to the consumer thread's AJAThread instance.
-            @param[in]    pThread        A valid pointer to the consumer thread's AJAThread instance.
-            @param[in]    pContext    Context information to pass to the thread.
-        **/
-        static void                HevcOutputThreadStatic (AJAThread * pThread, void * pContext);
-        /**
-            @brief    This is the audio file writer thread's static callback function that gets called when the thread starts.
-                    This function gets "Attached" to the consumer thread's AJAThread instance.
-            @param[in]    pThread        A valid pointer to the consumer thread's AJAThread instance.
-            @param[in]    pContext    Context information to pass to the thread.
-        **/
-        static void                AudioOutputThreadStatic (AJAThread * pThread, void * pContext);
-
     private:
     
         AJAStatus DetermineInputFormat(NTV2Channel inputChannel, bool quad, NTV2VideoFormat& videoFormat);
@@ -342,11 +282,8 @@ class NTV2GstAV
     //    Private Member Data
     private:
         AJAThread *                    mACInputThread;         ///    AutoCirculate input thread
-        AJAThread *                    mVideoOutputThread;     ///    Video output thread
         AJAThread *                    mCodecRawThread;        ///    Codec raw transfer
         AJAThread *                    mCodecHevcThread;        ///    Codec hevc transfer thread
-        AJAThread *                    mHevcOutputThread;        ///    Hevc output thread
-        AJAThread *                    mAudioOutputThread;        ///    Audio output thread
         CNTV2m31 *                    mM31;                    /// Object used to interface to m31
         AJALock *                    mLock;                  /// My mutex object
 
@@ -379,7 +316,6 @@ class NTV2GstAV
         bool                        mGlobalQuit;            ///    Set "true" to gracefully stop
         bool                        mStarted;               ///    Set "true" when threads are running
 
-        uint32_t                    mQueueSize;                ///    My queue size
         uint32_t                    mVideoBufferSize;        ///    My video buffer size (bytes)
         uint32_t                    mPicInfoBufferSize;     /// My picture info buffer size (bytes)
         uint32_t                    mEncInfoBufferSize;     /// My encoded info buffer size (bytes)
@@ -390,15 +326,9 @@ class NTV2GstAV
         NTV2Callback               mAudioCallback;         /// Callback for HEVC output (compressed frames)
         void *                     mAudioCallbackRefcon;   /// Callback refcon for AC output
 
-        AjaVideoBuff                            mACInputBuffer [VIDEO_RING_SIZE];           ///    My AC input buffers
-        AJACircularBuffer <AjaVideoBuff *>      mACInputCircularBuffer;                     ///    My AC input ring
+        AjaVideoBuff                            mHevcInputBuffer [VIDEO_RING_SIZE];           ///    My Hevc input buffers
+        AJACircularBuffer <AjaVideoBuff *>      mHevcInputCircularBuffer;                     ///    My Hevc input ring
 
-        AjaVideoBuff                            mVideoHevcBuffer [VIDEO_RING_SIZE];            ///    My video hevc buffers
-        AJACircularBuffer <AjaVideoBuff *>      mVideoHevcCircularBuffer;                    ///    My video hevc ring
-
-        AjaAudioBuff                            mAudioInputBuffer [AUDIO_RING_SIZE];        ///    My audio input buffers
-        AJACircularBuffer <AjaAudioBuff *>      mAudioInputCircularBuffer;                    ///    My audio input ring
-    
         AjaVideoBuff                            mVideoOutBuffer [VIDEO_ARRAY_SIZE];         ///    Video out buffers passed using callback
         AjaAudioBuff                            mAudioOutBuffer [AUDIO_ARRAY_SIZE];         ///    Audio out buffers passed using callback
 
