@@ -182,8 +182,9 @@ static GstStructure *
 gst_aja_mode_get_structure_raw (GstAjaModeRawEnum e)
 {
     const GstAjaMode *mode = gst_aja_get_mode_raw (e);
+    GstStructure *s;
     
-    return gst_structure_new ("video/x-raw",
+    s = gst_structure_new ("video/x-raw",
                               "format", G_TYPE_STRING, mode->bitDepth == 8 ? "UYVY" : "v210",
                               "width", G_TYPE_INT, mode->width,
                               "height", G_TYPE_INT, mode->height,
@@ -193,6 +194,15 @@ gst_aja_mode_get_structure_raw (GstAjaModeRawEnum e)
                               "colorimetry", G_TYPE_STRING, mode->colorimetry,
                               "chroma-site", G_TYPE_STRING, "mpeg2",
                               NULL);
+
+    if (mode->isInterlaced) {
+        if (mode->isTff)
+            gst_structure_set (s, "field-order", G_TYPE_STRING, "top-field-first", NULL);
+        else
+            gst_structure_set (s, "field-order", G_TYPE_STRING, "bottom-field-first", NULL);
+    }
+
+    return s;
 }
 
 GstCaps *
