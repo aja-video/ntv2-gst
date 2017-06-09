@@ -227,7 +227,7 @@ struct _GstAjaClockClass
 
 GType gst_aja_clock_get_type (void);
 
-GstAjaInput *  gst_aja_acquire_input (gint deviceNum, gint channel, GstElement * src, gboolean is_audio, gboolean is_hevc);
+GstAjaInput *  gst_aja_acquire_input (const gchar * deviceIdentifier, gint channel, GstElement * src, gboolean is_audio, gboolean is_hevc);
 
 
 #define GST_TYPE_AJA_BUFFER_POOL \

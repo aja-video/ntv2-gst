@@ -54,8 +54,8 @@ struct _GstAjaVideoSrc
     GQueue                      current_frames;
 
     guint                       queue_size;
+    gchar *                     device_identifier;
     guint                       input_channel;
-    guint                       device_number;
     gboolean                    output_stream_time;
     GstClockTime                skip_first_time;
 

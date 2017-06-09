@@ -29,7 +29,7 @@ GST_DEBUG_CATEGORY_STATIC (gst_aja_video_src_debug);
 #define GST_CAT_DEFAULT gst_aja_video_src_debug
 
 #define DEFAULT_MODE               (GST_AJA_MODE_RAW_720_8_5994p)
-#define DEFAULT_DEVICE_NUMBER      (0)
+#define DEFAULT_DEVICE_IDENTIFIER  ("0")
 #define DEFAULT_INPUT_CHANNEL      (0)
 #define DEFAULT_QUEUE_SIZE         (5)
 #define DEFAULT_OUTPUT_STREAM_TIME (FALSE)
@@ -39,7 +39,7 @@ enum
 {
     PROP_0,
     PROP_MODE,
-    PROP_DEVICE_NUMBER,
+    PROP_DEVICE_IDENTIFIER,
     PROP_INPUT_CHANNEL,
     PROP_QUEUE_SIZE,
     PROP_OUTPUT_STREAM_TIME,
@@ -121,11 +121,11 @@ gst_aja_video_src_class_init (GstAjaVideoSrcClass * klass)
                                                         GST_TYPE_AJA_MODE_RAW, DEFAULT_MODE,
                                                         (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT)));
     
-    g_object_class_install_property (gobject_class, PROP_DEVICE_NUMBER,
-                                     g_param_spec_uint ("device-number",
-                                                        "Device number",
+    g_object_class_install_property (gobject_class, PROP_DEVICE_IDENTIFIER,
+                                     g_param_spec_string ("device-identifier",
+                                                        "Device identifier",
                                                         "Input device instance to use",
-                                                        0, G_MAXINT, DEFAULT_DEVICE_NUMBER,
+                                                        DEFAULT_DEVICE_IDENTIFIER,
                                                         (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT)));
 
     g_object_class_install_property (gobject_class, PROP_INPUT_CHANNEL,
@@ -170,7 +170,7 @@ gst_aja_video_src_init (GstAjaVideoSrc *src)
 
     src->modeEnum = DEFAULT_MODE;
     src->input_channel = DEFAULT_INPUT_CHANNEL;
-    src->device_number = DEFAULT_DEVICE_NUMBER;
+    src->device_identifier = g_strdup (DEFAULT_DEVICE_IDENTIFIER);
     src->queue_size = DEFAULT_QUEUE_SIZE;
     src->output_stream_time = DEFAULT_OUTPUT_STREAM_TIME;
     src->skip_first_time = DEFAULT_SKIP_FIRST_TIME;
@@ -203,8 +203,9 @@ gst_aja_video_src_set_property (GObject * object, guint property_id, const GValu
             src->modeEnum = (GstAjaModeRawEnum) g_value_get_enum (value);
             break;
             
-        case PROP_DEVICE_NUMBER:
-            src->device_number = g_value_get_uint (value);
+        case PROP_DEVICE_IDENTIFIER:
+            g_free (src->device_identifier);
+            src->device_identifier = g_value_dup_string (value);
             break;
             
         case PROP_INPUT_CHANNEL:
@@ -241,8 +242,8 @@ gst_aja_video_src_get_property (GObject * object, guint property_id, GValue * va
             g_value_set_enum (value, src->modeEnum);
             break;
             
-        case PROP_DEVICE_NUMBER:
-            g_value_set_uint (value, src->device_number);
+        case PROP_DEVICE_IDENTIFIER:
+            g_value_set_string (value, src->device_identifier);
             break;
             
         case PROP_INPUT_CHANNEL:
@@ -275,6 +276,9 @@ gst_aja_video_src_finalize (GObject * object)
 
     g_queue_foreach (&src->current_frames, (GFunc) aja_capture_video_frame_free, NULL);
     g_queue_clear (&src->current_frames);
+
+    g_free (src->device_identifier);
+    src->device_identifier = NULL;
 
     g_free (src->times);
     src->times = NULL;
@@ -438,7 +442,7 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
     const GstAjaMode *  mode;
     GST_DEBUG_OBJECT (src, "open");
     
-    src->input = gst_aja_acquire_input (src->device_number, src->input_channel, GST_ELEMENT_CAST (src), FALSE, FALSE);
+    src->input = gst_aja_acquire_input (src->device_identifier, src->input_channel, GST_ELEMENT_CAST (src), FALSE, FALSE);
     if (!src->input)
     {
         GST_ERROR_OBJECT (src, "Failed to acquire input");

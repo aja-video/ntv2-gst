@@ -50,7 +50,7 @@ struct _GstAjaAudioSrc
     GstClockTime                discont_wait;
     GstClockTime                discont_time;
 
-    guint                       device_number;
+    gchar *                     device_identifier;
     guint                       input_channel;
     guint                       channels;
     guint                       queue_size;

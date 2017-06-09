@@ -39,39 +39,48 @@ struct _Device
     GstAjaInput     input[NTV2_CHANNEL8];
 };
 
-//static GOnce devices_once = G_ONCE_INIT;
-//static int n_devices;
-static Device devices[4];
+G_LOCK_DEFINE_STATIC (devices);
+static GHashTable *devices;
 
 GstAjaInput *
-gst_aja_acquire_input (gint deviceNum, gint channel, GstElement * src, gboolean is_audio, gboolean is_hevc)
+gst_aja_acquire_input (const gchar *inDeviceSpecifier, gint channel, GstElement * src, gboolean is_audio, gboolean is_hevc)
 {
     GstAjaInput *input;
-    
-    input = &devices[deviceNum].input[channel];
-    
+
+    G_LOCK (devices);
+    if (!devices)
+      devices = g_hash_table_new (g_str_hash, g_str_equal);
+    Device *device = (Device *) g_hash_table_lookup (devices, inDeviceSpecifier);
+    if (!device) {
+      device = g_new0 (Device, 1);
+      g_hash_table_insert (devices, g_strdup (inDeviceSpecifier), (gpointer) device);
+    }
+    input = &device->input[channel];
+
     g_mutex_lock (&input->lock);
 
     if (input->ntv2AVHevc == NULL) {
       // FIXME: Make this configurable
-      input->ntv2AVHevc = new NTV2GstAV("0", (NTV2Channel) channel);
+      input->ntv2AVHevc = new NTV2GstAV(std::string(inDeviceSpecifier), (NTV2Channel) channel);
     }
 
     if (is_audio && !input->audiosrc)
     {
         input->audiosrc = GST_ELEMENT_CAST (gst_object_ref (src));
         g_mutex_unlock (&input->lock);
+        G_UNLOCK (devices);
         return input;
-        
     } else if (!input->videosrc)
     {
         input->videosrc = GST_ELEMENT_CAST (gst_object_ref (src));
         g_mutex_unlock (&input->lock);
+        G_UNLOCK (devices);
         return input;
     }
     g_mutex_unlock (&input->lock);
-    
-    GST_ERROR ("Input device %d (audio: %d) in use already", deviceNum, is_audio);
+    G_UNLOCK (devices);
+
+    GST_ERROR ("Input device %s (audio: %d) in use already", inDeviceSpecifier, is_audio);
     return NULL;
 }
 
@@ -601,8 +610,6 @@ static gboolean
 aja_init (GstPlugin * plugin)
 {
      GST_DEBUG_CATEGORY_INIT (gst_aja_debug, "aja", 0, "debug category for aja plugin");
-
-    memset (devices, 0x0, sizeof (devices));
 
     gst_element_register (plugin, "ajavideosrc", GST_RANK_NONE, GST_TYPE_AJA_VIDEO_SRC);
   //  gst_element_register (plugin, "ajahevcsrc", GST_RANK_NONE, GST_TYPE_AJA_HEVC_SRC);

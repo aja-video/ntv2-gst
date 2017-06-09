@@ -43,7 +43,7 @@ GST_DEBUG_CATEGORY_STATIC (gst_aja_audio_src_debug);
 #define GST_CAT_DEFAULT gst_aja_audio_src_debug
 
 #define DEFAULT_CONNECTION      (GST_AJA_AUDIO_CONNECTION_AUTO)
-#define DEFAULT_DEVICE_NUMBER   (0)
+#define DEFAULT_DEVICE_IDENTIFIER ("0")
 #define DEFAULT_INPUT_CHANNEL   (0)
 #define DEFAULT_CHANNELS        (8)
 #define DEFAULT_QUEUE_SIZE      (5)
@@ -54,7 +54,7 @@ GST_DEBUG_CATEGORY_STATIC (gst_aja_audio_src_debug);
 enum
 {
     PROP_0,
-    PROP_DEVICE_NUMBER,
+    PROP_DEVICE_IDENTIFIER,
     PROP_INPUT_CHANNEL,
     PROP_CHANNELS,
     PROP_ALIGNMENT_THRESHOLD,
@@ -140,11 +140,11 @@ gst_aja_audio_src_class_init (GstAjaAudioSrcClass * klass)
     
     pushsrc_class->create = GST_DEBUG_FUNCPTR (gst_aja_audio_src_create);
     
-    g_object_class_install_property (gobject_class, PROP_DEVICE_NUMBER,
-                                     g_param_spec_uint ("device-number",
-                                                        "Device number",
+    g_object_class_install_property (gobject_class, PROP_DEVICE_IDENTIFIER,
+                                     g_param_spec_string ("device-identifier",
+                                                        "Device identifier",
                                                         "Input device instance to use",
-                                                        0, G_MAXINT, DEFAULT_DEVICE_NUMBER,
+                                                        DEFAULT_DEVICE_IDENTIFIER,
                                                         (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS | G_PARAM_CONSTRUCT)));
     
     g_object_class_install_property (gobject_class, PROP_INPUT_CHANNEL,
@@ -198,7 +198,7 @@ gst_aja_audio_src_init (GstAjaAudioSrc *src)
     GST_DEBUG_OBJECT (src, "init");
     
     src->input_channel = DEFAULT_INPUT_CHANNEL;
-    src->device_number = DEFAULT_DEVICE_NUMBER;
+    src->device_identifier = g_strdup (DEFAULT_DEVICE_IDENTIFIER);
     src->channels = DEFAULT_CHANNELS;
     src->queue_size = DEFAULT_QUEUE_SIZE;
     src->alignment_threshold = DEFAULT_ALIGNMENT_THRESHOLD;
@@ -221,8 +221,9 @@ gst_aja_audio_src_set_property (GObject * object, guint property_id, const GValu
     
     switch (property_id)
     {
-        case PROP_DEVICE_NUMBER:
-            src->device_number = g_value_get_uint (value);
+        case PROP_DEVICE_IDENTIFIER:
+            g_free (src->device_identifier);
+            src->device_identifier = g_value_dup_string (value);
             break;
             
         case PROP_INPUT_CHANNEL:
@@ -259,8 +260,8 @@ gst_aja_audio_src_get_property (GObject * object, guint property_id, GValue * va
     
     switch (property_id)
     {
-        case PROP_DEVICE_NUMBER:
-            g_value_set_uint (value, src->device_number);
+        case PROP_DEVICE_IDENTIFIER:
+            g_value_set_string (value, src->device_identifier);
             break;
             
         case PROP_INPUT_CHANNEL:
@@ -296,6 +297,9 @@ gst_aja_audio_src_finalize (GObject * object)
 
     g_queue_foreach (&src->current_packets, (GFunc) aja_capture_audio_packet_free, NULL);
     g_queue_clear (&src->current_packets);
+
+    g_free (src->device_identifier);
+    src->device_identifier = NULL;
 
     g_mutex_clear (&src->lock);
     g_cond_clear (&src->cond);
@@ -456,7 +460,7 @@ gst_aja_audio_src_open (GstAjaAudioSrc * src)
     AJAStatus           status;
     GST_DEBUG_OBJECT (src, "open");
     
-    src->input = gst_aja_acquire_input (src->device_number, src->input_channel, GST_ELEMENT_CAST (src), TRUE, FALSE);
+    src->input = gst_aja_acquire_input (src->device_identifier, src->input_channel, GST_ELEMENT_CAST (src), TRUE, FALSE);
     if (!src->input)
     {
         GST_ERROR_OBJECT (src, "Failed to acquire input");
