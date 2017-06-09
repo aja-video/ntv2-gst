@@ -50,6 +50,8 @@ typedef struct
     uint32_t        infoDataSize;           /// Size of the information data (bytes)
 
     uint32_t        frameNumber;            /// Frame number
+    uint8_t         fieldCount;             /// Number of fields
+    bool            timeCodeValid;
     uint32_t        timeCodeDBB;            /// Time code data dbb
     uint32_t        timeCodeLow;            /// Time code data low
     uint32_t        timeCodeHigh;           /// Time code data high

@@ -905,6 +905,37 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     GST_BUFFER_TIMESTAMP (*buffer) = f->capture_time;
     GST_BUFFER_DURATION (*buffer) = GST_CLOCK_TIME_NONE;
 
+    if (f->video_buff->timeCodeValid) {
+      uint8_t hours, minutes, seconds, frames;
+      GstVideoTimeCodeFlags flags = GST_VIDEO_TIME_CODE_FLAGS_NONE;
+      guint field_count = 0;
+      GstVideoTimeCode tc;
+
+      if (src->input->mode->isInterlaced) {
+        flags = (GstVideoTimeCodeFlags) (flags | GST_VIDEO_TIME_CODE_FLAGS_INTERLACED);
+        field_count = f->video_buff->fieldCount == 0 ? 2 : f->video_buff->fieldCount;
+      }
+
+      // Any better way to detect this?
+      if (src->input->mode->fps_d == 1001) {
+        flags = (GstVideoTimeCodeFlags) (flags | GST_VIDEO_TIME_CODE_FLAGS_DROP_FRAME);
+      }
+
+      hours = (((f->video_buff->timeCodeHigh & RP188_HOURTENS_MASK) >> 24) * 10) +
+              ((f->video_buff->timeCodeHigh & RP188_HOURUNITS_MASK) >> 16);
+      minutes = (((f->video_buff->timeCodeHigh & RP188_MINUTESTENS_MASK) >> 8) * 10) +
+              (f->video_buff->timeCodeHigh & RP188_MINUTESUNITS_MASK);
+      seconds = (((f->video_buff->timeCodeLow & RP188_SECONDTENS_MASK) >> 24) * 10) +
+              ((f->video_buff->timeCodeLow & RP188_SECONDUNITS_MASK) >> 16);
+      frames = (((f->video_buff->timeCodeLow & RP188_FRAMETENS_MASK) >> 8) * 10) +
+              (f->video_buff->timeCodeLow & RP188_FRAMEUNITS_MASK);
+
+      gst_video_time_code_init (&tc, src->input->mode->fps_n, src->input->mode->fps_d, NULL, flags,
+            hours, minutes, seconds, frames, field_count);
+      gst_buffer_add_video_time_code_meta (*buffer, &tc);
+      gst_video_time_code_clear (&tc);
+    }
+
 #if GST_CHECK_VERSION (1, 13, 0)
     gst_buffer_add_reference_timestamp_meta (*buffer,
         gst_static_caps_get (&stream_reference), f->stream_time,

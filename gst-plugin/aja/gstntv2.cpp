@@ -908,9 +908,12 @@ void NTV2GstAV::ACInputWorker (void)
             pVideoData->timeStamp = mInputTransferStruct.acTransferStatus.acFrameStamp.acFrameTime;
             pAudioData->timeStamp = mInputTransferStruct.acTransferStatus.acFrameStamp.acFrameTime;
 
+            pVideoData->fieldCount = mInputTransferStruct.acTransferStatus.acFrameStamp.acCurrentFieldCount;
+
             pVideoData->frameNumber = mVideoInputFrameCount;
             pAudioData->frameNumber = mVideoInputFrameCount;
 
+            pVideoData->timeCodeValid = false;
             if (mWithAnc)
             {
                 NTV2_RP188 timeCode;
@@ -919,6 +922,7 @@ void NTV2GstAV::ACInputWorker (void)
                   pVideoData->timeCodeDBB = timeCode.fDBB;
                   pVideoData->timeCodeLow = timeCode.fLo;
                   pVideoData->timeCodeHigh = timeCode.fHi;
+                  pVideoData->timeCodeValid = true;
                 }
             }
 
