@@ -65,22 +65,6 @@ aja_capture_video_frame_free (void *data)
     g_free (frame);
 }
 
-typedef struct
-{
-    GstAjaVideoSrc              *video_src;
-    AjaVideoBuff                *video_buff;
-} AjaVideoFrame;
-
-static void
-aja_video_frame_free (void *data)
-{
-    AjaVideoFrame *frame = (AjaVideoFrame *) data;
-
-    if ((frame->video_src->input) && (frame->video_src->input->ntv2AVHevc))
-        frame->video_src->input->ntv2AVHevc->ReleaseVideoBuffer(frame->video_buff);
-    g_free (frame);
-}
-
 static void gst_aja_video_src_set_property (GObject * object, guint property_id, const GValue * value, GParamSpec * pspec);
 static void gst_aja_video_src_get_property (GObject * object, guint property_id, GValue * value, GParamSpec * pspec);
 
@@ -289,13 +273,13 @@ gst_aja_video_src_finalize (GObject * object)
     GstAjaVideoSrc *src = GST_AJA_VIDEO_SRC (object);
     GST_DEBUG_OBJECT (src, "finalize");
 
+    g_queue_foreach (&src->current_frames, (GFunc) aja_capture_video_frame_free, NULL);
+    g_queue_clear (&src->current_frames);
+
     g_free (src->times);
     src->times = NULL;
     g_mutex_clear (&src->lock);
     g_cond_clear (&src->cond);
-
-    g_queue_foreach (&src->current_frames, (GFunc) aja_capture_video_frame_free, NULL);
-    g_queue_clear (&src->current_frames);
     
     // Call parent class
     G_OBJECT_CLASS (parent_class)->finalize (object);
@@ -532,9 +516,6 @@ gst_aja_video_src_stop (GstAjaVideoSrc * src)
 {
     GST_DEBUG_OBJECT (src, "stop");
     
-    g_queue_foreach (&src->current_frames, (GFunc) aja_capture_video_frame_free, NULL);
-    g_queue_clear (&src->current_frames);
-    
     if (src->input && src->input->video_enabled)
     {
         g_mutex_lock (&src->input->lock);
@@ -543,6 +524,9 @@ gst_aja_video_src_stop (GstAjaVideoSrc * src)
         src->input->ntv2AVHevc->SetCallback(VIDEO_CALLBACK, 0, 0);
         g_mutex_unlock (&src->input->lock);
     }
+
+    g_queue_foreach (&src->current_frames, (GFunc) aja_capture_video_frame_free, NULL);
+    g_queue_clear (&src->current_frames);
 
     return TRUE;
 }
@@ -860,6 +844,8 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
         
         g_queue_push_tail (&src->current_frames, f);
         g_cond_signal (&src->cond);
+    } else {
+      src->input->ntv2AVHevc->ReleaseVideoBuffer(videoBuff);
     }
     g_mutex_unlock (&src->lock);
 }
@@ -875,9 +861,6 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     
     GstFlowReturn flow_ret = GST_FLOW_OK;
     
-    const guint8 *data;
-    gsize data_size;
-    AjaVideoFrame *vf;
     AjaCaptureVideoFrame *f;
     GstCaps *caps;
     
@@ -915,20 +898,9 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
         g_mutex_unlock (&src->lock);
     }
     
-    data = (const guint8 *)f->video_buff->pVideoBuffer;
-    data_size = (gsize)f->video_buff->videoDataSize;
-
     //printf("data_size = %ld\n", data_size);
     
-    vf = (AjaVideoFrame *) g_malloc0 (sizeof (AjaVideoFrame));
-    
-    *buffer = gst_buffer_new_wrapped_full ((GstMemoryFlags) GST_MEMORY_FLAG_READONLY,
-                                           (gpointer) data, data_size, 0, data_size, vf,
-                                           (GDestroyNotify) aja_video_frame_free);
-    
-    vf->video_src = f->video_src;
-    vf->video_buff = f->video_buff;
-    src->input->ntv2AVHevc->AddRefVideoBuffer(vf->video_buff);
+    *buffer = gst_buffer_ref (f->video_buff->buffer);
     
     GST_BUFFER_TIMESTAMP (*buffer) = f->capture_time;
     GST_BUFFER_DURATION (*buffer) = GST_CLOCK_TIME_NONE;
@@ -946,6 +918,7 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
                       GST_TIME_ARGS (GST_BUFFER_DURATION (*buffer)));
 #endif
     aja_capture_video_frame_free (f);
+
     return flow_ret;
 }
 

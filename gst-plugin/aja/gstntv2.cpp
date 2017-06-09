@@ -7,6 +7,7 @@
 #include <stdio.h>
 
 #include "gstntv2.h"
+#include "gstaja.h"
 #include "ntv2utils.h"
 #include "ntv2devicefeatures.h"
 #include "ajabase/system/process.h"
@@ -43,6 +44,8 @@ NTV2GstAV::NTV2GstAV (const string inDeviceSpecifier, const NTV2Channel inChanne
     mVideoCallbackRefcon    (0),
     mAudioCallback          (0),
     mAudioCallbackRefcon    (0),
+    mAudioBufferPool        (NULL),
+    mVideoBufferPool        (NULL),
     mVideoInputFrameCount    (0),        
     mVideoOutFrameCount     (0),
     mCodecRawFrameCount        (0),
@@ -52,8 +55,6 @@ NTV2GstAV::NTV2GstAV (const string inDeviceSpecifier, const NTV2Channel inChanne
 
 {
     ::memset (mHevcInputBuffer, 0x0, sizeof (mHevcInputBuffer));
-    ::memset (mVideoOutBuffer, 0x0, sizeof (mVideoOutBuffer));
-    ::memset (mAudioOutBuffer, 0x0, sizeof (mAudioOutBuffer));
 
 }    //    constructor
 
@@ -652,38 +653,20 @@ void NTV2GstAV::SetupHostBuffers (void)
 
     // These video buffers are actually passed out of this class so we need to assign them unique numbers
     // so they can be tracked and also they have a state
-    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_ARRAY_SIZE; bufferNdx++ )
-    {
-        memset (&mVideoOutBuffer[bufferNdx], 0, sizeof(AjaVideoBuff));
-        mVideoOutBuffer[bufferNdx].bufferId         = bufferNdx + 1;
-        mVideoOutBuffer[bufferNdx].bufferRef        = 0;
-        mVideoOutBuffer[bufferNdx].pVideoBuffer        = new uint32_t [mVideoBufferSize/4];
-        mVideoOutBuffer[bufferNdx].videoBufferSize    = mVideoBufferSize;
-        mVideoOutBuffer[bufferNdx].videoDataSize    = 0;
-        if (mHevcOutput)
-        {
-            mVideoOutBuffer[bufferNdx].pInfoBuffer        = new uint32_t [mEncInfoBufferSize/4];
-            mVideoOutBuffer[bufferNdx].infoBufferSize   = mEncInfoBufferSize;
-        }
-        else
-        {
-            mVideoOutBuffer[bufferNdx].pInfoBuffer        = new uint32_t [mPicInfoBufferSize/4];
-            mVideoOutBuffer[bufferNdx].infoBufferSize   = mPicInfoBufferSize;
-        }
-        mVideoOutBuffer[bufferNdx].infoDataSize        = 0;
-    }
+    mVideoBufferPool = gst_aja_buffer_pool_new ();
+    GstStructure *config = gst_buffer_pool_get_config (mVideoBufferPool);
+    gst_buffer_pool_config_set_params (config, NULL, mVideoBufferSize, VIDEO_ARRAY_SIZE, 0);
+    gst_structure_set (config, "is-video", G_TYPE_BOOLEAN, TRUE, "is-hevc", G_TYPE_BOOLEAN, mHevcOutput, NULL);
+    gst_buffer_pool_set_config (mVideoBufferPool, config);
+    gst_buffer_pool_set_active (mVideoBufferPool, TRUE);
 
-    // These audio buffers are actually passed out of this class so we need to assign them unique numbers
-    // so they can be tracked and also they have a state
-    for (unsigned bufferNdx = 0; bufferNdx < AUDIO_ARRAY_SIZE; bufferNdx++ )
-    {
-        memset (&mAudioOutBuffer[bufferNdx], 0, sizeof(AjaAudioBuff));
-        mAudioOutBuffer[bufferNdx].bufferId             = bufferNdx + 1;
-        mAudioOutBuffer[bufferNdx].bufferRef            = 0;
-        mAudioOutBuffer[bufferNdx].pAudioBuffer         = new uint32_t [mAudioBufferSize/4];
-        mAudioOutBuffer[bufferNdx].audioBufferSize      = mAudioBufferSize;
-        mAudioOutBuffer[bufferNdx].audioDataSize        = 0;
-    }
+    mAudioBufferPool = gst_aja_buffer_pool_new ();
+    config = gst_buffer_pool_get_config (mAudioBufferPool);
+    gst_buffer_pool_config_set_params (config, NULL, mAudioBufferSize, AUDIO_ARRAY_SIZE, 0);
+    gst_structure_set (config, "is-video", G_TYPE_BOOLEAN, FALSE, "is-hevc", G_TYPE_BOOLEAN, FALSE, NULL);
+    gst_buffer_pool_set_config (mAudioBufferPool, config);
+    gst_buffer_pool_set_active (mAudioBufferPool, TRUE);
+
 }    //    SetupHostBuffers
 
 
@@ -707,27 +690,16 @@ void NTV2GstAV::FreeHostBuffers (void)
         mHevcInputCircularBuffer.Clear ();
     }
 
-    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_ARRAY_SIZE; bufferNdx++)
-    {
-        if (mVideoOutBuffer[bufferNdx].pVideoBuffer)
-        {
-            delete [] mVideoOutBuffer[bufferNdx].pVideoBuffer;
-            mVideoOutBuffer[bufferNdx].pVideoBuffer = NULL;
-        }
-        if (mVideoOutBuffer[bufferNdx].pInfoBuffer)
-        {
-            delete [] mVideoOutBuffer[bufferNdx].pInfoBuffer;
-            mVideoOutBuffer[bufferNdx].pInfoBuffer = NULL;
-        }
+    if (mVideoBufferPool) {
+        gst_buffer_pool_set_active (mVideoBufferPool, FALSE);
+        gst_object_unref (mVideoBufferPool);
+        mVideoBufferPool = NULL;
     }
 
-    for (unsigned bufferNdx = 0; bufferNdx < AUDIO_ARRAY_SIZE; bufferNdx++)
-    {
-        if (mAudioOutBuffer[bufferNdx].pAudioBuffer)
-        {
-            delete [] mAudioOutBuffer[bufferNdx].pAudioBuffer;
-            mAudioOutBuffer[bufferNdx].pAudioBuffer = NULL;
-        }
+    if (mAudioBufferPool) {
+        gst_buffer_pool_set_active (mAudioBufferPool, FALSE);
+        gst_object_unref (mAudioBufferPool);
+        mAudioBufferPool = NULL;
     }
 }
 
@@ -893,10 +865,21 @@ void NTV2GstAV::ACInputWorker (void)
             // frame buffer to transfer to the host. Reserve an AvaDataBuffer to "produce", and
             // use it in the next transfer from the device...
             AjaVideoBuff *    pVideoData    (mHevcOutput ? mHevcInputCircularBuffer.StartProduceNextBuffer () : AcquireVideoBuffer());
+            GstMapInfo video_map, audio_map;
 
+            if (pVideoData->buffer) {
+              gst_buffer_map (pVideoData->buffer, &video_map, GST_MAP_READWRITE);
+              pVideoData->pVideoBuffer = (uint32_t *) video_map.data;
+              pVideoData->videoBufferSize = video_map.size;
+            }
             mInputTransferStruct.SetVideoBuffer(pVideoData->pVideoBuffer, pVideoData->videoBufferSize);
 
             AjaAudioBuff *    pAudioData = AcquireAudioBuffer();
+            if (pAudioData->buffer) {
+              gst_buffer_map (pAudioData->buffer, &audio_map, GST_MAP_READWRITE);
+              pAudioData->pAudioBuffer = (uint32_t *) audio_map.data;
+              pAudioData->audioBufferSize = audio_map.size;
+            }
             mInputTransferStruct.SetAudioBuffer(pAudioData->pAudioBuffer, pAudioData->audioBufferSize);
 
             // do the transfer from the device into our host AvaDataBuffer...
@@ -904,10 +887,20 @@ void NTV2GstAV::ACInputWorker (void)
 
             // get the video data size
             pVideoData->videoDataSize = pVideoData->videoBufferSize;
+            if (pVideoData->buffer) {
+              gst_buffer_unmap (pVideoData->buffer, &video_map);
+              gst_buffer_resize (pVideoData->buffer, 0, pVideoData->videoDataSize);
+              pVideoData->pVideoBuffer = NULL;
+            }
             pVideoData->lastFrame = mLastFrame;
 
             // get the audio data size
             pAudioData->audioDataSize = mInputTransferStruct.acTransferStatus.acAudioTransferSize;
+            if (pAudioData->buffer) {
+              gst_buffer_unmap (pAudioData->buffer, &audio_map);
+              gst_buffer_resize (pAudioData->buffer, 0, pAudioData->audioDataSize);
+              pAudioData->pAudioBuffer = NULL;
+            }
             pAudioData->lastFrame = mLastFrame;
 
             // FIXME: this should actually use acAudioClockTimeStamp but
@@ -969,7 +962,6 @@ void NTV2GstAV::ACInputWorker (void)
               // no one is there to catch them
               if (!DoCallback(VIDEO_CALLBACK, pVideoData))
                   ReleaseVideoBuffer(pVideoData);
-
 
               if (pVideoData->lastFrame)
               {
@@ -1173,82 +1165,56 @@ void NTV2GstAV::SetCallback(CallBackType cbType, NTV2Callback callback, void * c
     }
 }
 
-
 AjaVideoBuff* NTV2GstAV::AcquireVideoBuffer()
 {
-    AJAAutoLock    autoLock (mLock);
-    
-    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_ARRAY_SIZE; bufferNdx++ )
-    {
-        if (mVideoOutBuffer[bufferNdx].bufferRef == 0)
-        {
-            mVideoOutBuffer[bufferNdx].bufferRef++;
-            //printf("acquired video buffer %d\n", mVideoOutBuffer[bufferNdx].bufferId);
+    GstBuffer *buffer;
+    AjaVideoBuff *videoBuff;
 
-            return &mVideoOutBuffer[bufferNdx];
-        }
-    }
-    printf("Error: could not find a video buffer\n");
-    return NULL;
+    if (gst_buffer_pool_acquire_buffer (mVideoBufferPool, &buffer, NULL) != GST_FLOW_OK)
+      return NULL;
+
+    videoBuff = gst_aja_buffer_get_video_buff (buffer);
+    return videoBuff;
 }
-
 
 AjaAudioBuff* NTV2GstAV::AcquireAudioBuffer()
 {
-    AJAAutoLock    autoLock (mLock);
+    GstBuffer *buffer;
+    AjaAudioBuff *audioBuff;
 
-    for (unsigned bufferNdx = 0; bufferNdx < AUDIO_ARRAY_SIZE; bufferNdx++ )
-    {
-        if (mAudioOutBuffer[bufferNdx].bufferRef == 0)
-        {
-            mAudioOutBuffer[bufferNdx].bufferRef++;
-            //printf("acquired audio buffer %d\n", mAudioOutBuffer[bufferNdx].bufferId);
+    if (gst_buffer_pool_acquire_buffer (mAudioBufferPool, &buffer, NULL) != GST_FLOW_OK)
+      return NULL;
 
-            return &mAudioOutBuffer[bufferNdx];
-        }
-    }
-    printf("Error: could not find an audio buffer\n");
-    return NULL;
+    audioBuff = gst_aja_buffer_get_audio_buff (buffer);
+    return audioBuff;
 }
 
 
 void NTV2GstAV::ReleaseVideoBuffer(AjaVideoBuff * videoBuffer)
 {
-    AJAAutoLock    autoLock (mLock);
-
-    if (videoBuffer->bufferRef)
-    {
-        videoBuffer->bufferRef--;
-        //printf("released video buffer %d %d\n", videoBuffer->bufferId, videoBuffer->bufferRef);
-    }
+    if (videoBuffer->buffer)
+      gst_buffer_unref (videoBuffer->buffer);
 }
 
 
 void NTV2GstAV::ReleaseAudioBuffer(AjaAudioBuff * audioBuffer)
 {
-    AJAAutoLock    autoLock (mLock);
-
-    if (audioBuffer->bufferRef)
-    {
-        audioBuffer->bufferRef--;
-        //printf("released audio buffer %d %d\n", audioBuffer->bufferId, audioBuffer->bufferRef);
-    }
+    if (audioBuffer->buffer)
+      gst_buffer_unref (audioBuffer->buffer);
 }
 
 
 void NTV2GstAV::AddRefVideoBuffer(AjaVideoBuff * videoBuffer)
 {
-    AJAAutoLock    autoLock (mLock);
-    videoBuffer->bufferRef++;
-    //printf("add ref video buffer %d %d\n", videoBuffer->bufferId, videoBuffer->bufferRef);
+    if (videoBuffer->buffer)
+      gst_buffer_ref (videoBuffer->buffer);
 }
 
 
 void NTV2GstAV::AddRefAudioBuffer(AjaAudioBuff * audioBuffer)
 {
-    AJAAutoLock    autoLock (mLock);
-    audioBuffer->bufferRef++;
-    //printf("add ref audio buffer %d %d\n", audioBuffer->bufferId, audioBuffer->bufferRef);
+    if (audioBuffer->buffer)
+      gst_buffer_ref (audioBuffer->buffer);
 }
 
 

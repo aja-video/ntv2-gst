@@ -91,22 +91,6 @@ aja_capture_audio_packet_free (void *data)
     g_free (packet);
 }
 
-typedef struct
-{
-    GstAjaAudioSrc              *audio_src;
-    AjaAudioBuff                *audio_buff;
-} AjaAudioPacket;
-
-static void
-aja_audio_packet_free (void *data)
-{
-    AjaAudioPacket *packet = (AjaAudioPacket *) data;
-    
-    if ((packet->audio_src->input) && (packet->audio_src->input->ntv2AVHevc))
-        packet->audio_src->input->ntv2AVHevc->ReleaseAudioBuffer(packet->audio_buff);
-    g_free (packet);
-}
-
 static void gst_aja_audio_src_set_property (GObject * object, guint property_id, const GValue * value, GParamSpec * pspec);
 static void gst_aja_audio_src_get_property (GObject * object, guint property_id, GValue * value, GParamSpec * pspec);
 
@@ -524,9 +508,6 @@ gst_aja_audio_src_stop (GstAjaAudioSrc * src)
 {
     GST_DEBUG_OBJECT (src, "stop");
     
-    g_queue_foreach (&src->current_packets, (GFunc) aja_capture_audio_packet_free, NULL);
-    g_queue_clear (&src->current_packets);
-    
     if (src->input && src->input->audio_enabled)
     {
         g_mutex_lock (&src->input->lock);
@@ -534,6 +515,9 @@ gst_aja_audio_src_stop (GstAjaAudioSrc * src)
         src->input->ntv2AVHevc->SetCallback(AUDIO_CALLBACK, 0, 0);
         g_mutex_unlock (&src->input->lock);
     }
+
+    g_queue_foreach (&src->current_packets, (GFunc) aja_capture_audio_packet_free, NULL);
+    g_queue_clear (&src->current_packets);
     
     return TRUE;
 }
@@ -635,11 +619,6 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
     
     if (videosrc)
     {
-        // FIXME: This is not a problem anymore after switching to bufferpools
-        // and a single layer of copying in AJA: we will always get video
-        // first then
-        while (!videosrc->current_time_mapping.b)
-          g_usleep (10);
         g_mutex_lock (&videosrc->lock);
 
         if (videosrc->first_time == GST_CLOCK_TIME_NONE)
@@ -690,6 +669,8 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
         
         g_queue_push_tail (&src->current_packets, f);
         g_cond_signal (&src->cond);
+    } else {
+      src->input->ntv2AVHevc->ReleaseAudioBuffer(audioBuff);
     }
     g_mutex_unlock (&src->lock);
 }
@@ -707,7 +688,6 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     const guint8 *data;
     glong sample_count = 0;
     gsize data_size;
-    AjaAudioPacket *ap;
     AjaCaptureAudioPacket *p;
     
     GstClockTime timestamp, duration;
@@ -738,18 +718,8 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     data_size = (gsize)p->audio_buff->audioDataSize;
     sample_count = data_size / src->info.bpf;
     
-    ap = (AjaAudioPacket *) g_malloc0 (sizeof (AjaAudioPacket));
-
-    *buffer = gst_buffer_new_wrapped_full ((GstMemoryFlags) GST_MEMORY_FLAG_READONLY,
-                                           (gpointer) data, data_size, 0, data_size, ap,
-                                           (GDestroyNotify) aja_audio_packet_free);
+    *buffer = gst_buffer_ref (p->audio_buff->buffer);
     
-    
-    ap->audio_src = p->audio_src;
-    ap->audio_buff = p->audio_buff;
-    src->input->ntv2AVHevc->AddRefAudioBuffer(ap->audio_buff);
- 
-
     timestamp = p->capture_time;
     
     // Jitter and discontinuity handling, based on audiobasesrc

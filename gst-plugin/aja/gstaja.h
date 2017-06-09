@@ -226,11 +226,42 @@ struct _GstAjaClockClass
 };
 
 GType gst_aja_clock_get_type (void);
-GstClock *gst_aja_clock_new (const gchar * name);
 
-
-void    gst_set_aja_clock_and_element (GstElement * element, gboolean is_audio);
 GstAjaInput *  gst_aja_acquire_input (gint deviceNum, gint channel, GstElement * src, gboolean is_audio, gboolean is_hevc);
 
+
+#define GST_TYPE_AJA_BUFFER_POOL \
+(gst_aja_buffer_pool_get_type())
+#define GST_AJA_BUFFER_POOL(obj) \
+(G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_AJA_BUFFER_POOL,GstAjaBufferPool))
+#define GST_AJA_BUFFER_POOL_CLASS(klass) \
+(G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_AJA_BUFFER_POOL,GstAjaBufferPoolClass))
+#define GST_IS_Aja_BUFFER_POOL(obj) \
+(G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_AJA_BUFFER_POOL))
+#define GST_IS_Aja_BUFFER_POOL_CLASS(klass) \
+(G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_AJA_BUFFER_POOL))
+#define GST_AJA_BUFFER_POOL_CAST(obj) \
+((GstAjaBufferPool*)(obj))
+
+typedef struct _GstAjaBufferPool GstAjaBufferPool;
+typedef struct _GstAjaBufferPoolClass GstAjaBufferPoolClass;
+
+struct _GstAjaBufferPool
+{
+    GstBufferPool buffer_pool;
+
+    gboolean is_video, is_hevc;
+    guint size;
+};
+
+struct _GstAjaBufferPoolClass
+{
+    GstBufferPoolClass parent_class;
+};
+
+GType gst_aja_buffer_pool_get_type (void);
+GstBufferPool * gst_aja_buffer_pool_new (void);
+AjaVideoBuff * gst_aja_buffer_get_video_buff (GstBuffer * buffer);
+AjaAudioBuff * gst_aja_buffer_get_audio_buff (GstBuffer * buffer);
 
 #endif

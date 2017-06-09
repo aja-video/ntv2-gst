@@ -430,6 +430,150 @@ gst_aja_clock_get_internal_time (GstClock * clock)
     return result;
 }
 
+
+G_DEFINE_TYPE (GstAjaBufferPool, gst_aja_buffer_pool, GST_TYPE_BUFFER_POOL);
+
+static GQuark video_buffer_quark, audio_buffer_quark;
+
+static gboolean
+gst_aja_buffer_pool_set_config (GstBufferPool *pool, GstStructure *config)
+{
+    GstAjaBufferPool * aja_pool = GST_AJA_BUFFER_POOL (pool);
+
+    if (!GST_BUFFER_POOL_CLASS (gst_aja_buffer_pool_parent_class)->set_config (pool, config))
+        return FALSE;
+
+    if (!gst_structure_get_boolean (config, "is-video", &aja_pool->is_video))
+        return FALSE;
+    if (!gst_structure_get_boolean (config, "is-hevc", &aja_pool->is_hevc))
+        return FALSE;
+    if (!gst_buffer_pool_config_get_params (config, NULL, &aja_pool->size, NULL, NULL))
+        return FALSE;
+
+    return TRUE;
+}
+
+static void aja_audio_buff_free(AjaAudioBuff * audioBuff)
+{
+    delete audioBuff;
+}
+
+static void aja_video_buff_free(AjaVideoBuff * videoBuff)
+{
+    if (videoBuff->pInfoBuffer)
+        delete[] videoBuff->pInfoBuffer;
+
+    delete videoBuff;
+}
+
+static GstFlowReturn
+gst_aja_buffer_pool_alloc_buffer (GstBufferPool *pool, GstBuffer **buffer, GstBufferPoolAcquireParams *params)
+{
+    GstAjaBufferPool * aja_pool = GST_AJA_BUFFER_POOL (pool);
+    GstFlowReturn ret;
+
+    ret = GST_BUFFER_POOL_CLASS (gst_aja_buffer_pool_parent_class)->alloc_buffer (pool, buffer, params);
+    if (ret != GST_FLOW_OK)
+        return ret;
+
+    if (!aja_pool->is_video) {
+        AjaAudioBuff * audioBuff = new AjaAudioBuff;
+        audioBuff->buffer = *buffer;
+        audioBuff->pAudioBuffer = NULL;
+        audioBuff->audioBufferSize = 0;
+        audioBuff->audioDataSize = 0;
+
+        gst_mini_object_set_qdata (GST_MINI_OBJECT_CAST (*buffer), audio_buffer_quark, audioBuff, (GDestroyNotify) aja_audio_buff_free);
+    } else {
+        AjaVideoBuff * videoBuff = new AjaVideoBuff;
+
+        videoBuff->buffer = *buffer;
+        if (aja_pool->is_hevc) {
+            videoBuff->pInfoBuffer = new uint32_t [(sizeof(HevcEncodedInfo)*2)/4];
+            videoBuff->infoBufferSize = sizeof(HevcEncodedInfo)*2;
+        } else {
+            videoBuff->pInfoBuffer = new uint32_t [(sizeof(HevcPictureInfo)*2)/4];
+            videoBuff->infoBufferSize = sizeof(HevcPictureInfo)*2;
+        }
+        videoBuff->pVideoBuffer = NULL;
+        videoBuff->videoBufferSize = 0;
+        videoBuff->videoDataSize = 0;
+
+        gst_mini_object_set_qdata (GST_MINI_OBJECT_CAST (*buffer), video_buffer_quark, videoBuff, (GDestroyNotify) aja_video_buff_free);
+    }
+
+    return ret;
+}
+
+static void
+gst_aja_buffer_pool_reset_buffer (GstBufferPool *pool, GstBuffer *buffer)
+{
+    GstAjaBufferPool * aja_pool = GST_AJA_BUFFER_POOL (pool);
+    gsize maxsize, size;
+
+    // Update size again to the maximum, we might've made the buffer
+    // smaller because we got less data than the maximum
+    size = gst_buffer_get_sizes (buffer, NULL, &maxsize);
+    if (size != aja_pool->size && aja_pool->size < maxsize) {
+        gst_buffer_resize (buffer, 0, aja_pool->size);
+        size = aja_pool->size;
+    }
+    if (size == aja_pool->size && gst_buffer_n_memory (buffer) == 1)
+        GST_BUFFER_FLAG_UNSET (buffer, GST_BUFFER_FLAG_TAG_MEMORY);
+
+    GST_BUFFER_POOL_CLASS (gst_aja_buffer_pool_parent_class)->reset_buffer (pool, buffer);
+}
+
+static void
+gst_aja_buffer_pool_release_buffer (GstBufferPool * pool, GstBuffer * buffer)
+{
+    // Free if something removed our qdata
+    if (!gst_mini_object_get_qdata (GST_MINI_OBJECT_CAST (buffer), audio_buffer_quark) &&
+        !gst_mini_object_get_qdata (GST_MINI_OBJECT_CAST (buffer), video_buffer_quark))
+        GST_BUFFER_FLAG_SET (buffer, GST_BUFFER_FLAG_TAG_MEMORY);
+
+    GST_BUFFER_POOL_CLASS (gst_aja_buffer_pool_parent_class)->release_buffer (pool, buffer);
+}
+
+static void
+gst_aja_buffer_pool_class_init (GstAjaBufferPoolClass * klass)
+{
+    GstBufferPoolClass *buffer_pool_class = (GstBufferPoolClass *) klass;
+
+    buffer_pool_class->set_config = gst_aja_buffer_pool_set_config;
+    buffer_pool_class->alloc_buffer = gst_aja_buffer_pool_alloc_buffer;
+    buffer_pool_class->reset_buffer = gst_aja_buffer_pool_reset_buffer;
+    buffer_pool_class->release_buffer = gst_aja_buffer_pool_release_buffer;
+
+    video_buffer_quark = g_quark_from_static_string ("AjaVideoBuff");
+    audio_buffer_quark = g_quark_from_static_string ("AjaAudioBuff");
+}
+
+static void
+gst_aja_buffer_pool_init (GstAjaBufferPool * buffer_pool)
+{
+}
+
+GstBufferPool *
+gst_aja_buffer_pool_new (void)
+{
+    GstAjaBufferPool *self = GST_AJA_BUFFER_POOL (g_object_new (GST_TYPE_AJA_BUFFER_POOL, NULL));
+
+    return GST_BUFFER_POOL_CAST (self);
+}
+
+AjaVideoBuff *
+gst_aja_buffer_get_video_buff (GstBuffer * buffer)
+{
+    return (AjaVideoBuff *) gst_mini_object_get_qdata (GST_MINI_OBJECT_CAST (buffer), video_buffer_quark);
+}
+
+AjaAudioBuff *
+gst_aja_buffer_get_audio_buff (GstBuffer * buffer)
+{
+    return (AjaAudioBuff *) gst_mini_object_get_qdata (GST_MINI_OBJECT_CAST (buffer), audio_buffer_quark);
+}
+
 #ifndef VERSION
 #define VERSION "0.0.1"
 #endif

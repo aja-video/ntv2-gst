@@ -39,15 +39,17 @@ typedef enum
 
 typedef struct
 {
-    uint32_t        bufferId;               /// Unique buffer number to identify buffer when it come back to us to be freed
-    uint32_t        bufferRef;              /// Buffer use counter
-    uint32_t        frameNumber;            /// Frame number
-    uint32_t *      pVideoBuffer;            ///    Pointer to host video buffer
-    uint32_t        videoBufferSize;        ///    Size of host video buffer (bytes)
-    uint32_t        videoDataSize;            ///    Size of video data (bytes)
+    GstBuffer *     buffer;                 /// If buffer != NULL, it actually owns the AjaVideoBuff and the following 3 fields are NULL
+
+    uint32_t *      pVideoBuffer;           /// Pointer to host video buffer
+    uint32_t        videoBufferSize;        /// Size of host video buffer (bytes)
+    uint32_t        videoDataSize;          /// Size of video data (bytes)
+
     uint32_t *      pInfoBuffer;            /// Picture information (raw) or encode information (hevc)
     uint32_t        infoBufferSize;         /// Size of the host information buffer (bytes)
     uint32_t        infoDataSize;           /// Size of the information data (bytes)
+
+    uint32_t        frameNumber;            /// Frame number
     uint32_t        timeCodeDBB;            /// Time code data dbb
     uint32_t        timeCodeLow;            /// Time code data low
     uint32_t        timeCodeHigh;           /// Time code data high
@@ -58,14 +60,15 @@ typedef struct
 
 typedef struct
 {
-    uint32_t        bufferId;               /// Unique buffer number to identify buffer when it come back to us to be freed
-    uint32_t        bufferRef;              /// Buffer use counter
-    uint32_t        frameNumber;            /// Frame number
-    uint32_t *      pAudioBuffer;            ///    Pointer to host audio buffer
+    GstBuffer *     buffer;                 /// If buffer != NULL, it actually owns the AjaAudioBuff
+
+    uint32_t *      pAudioBuffer;           ///    Pointer to host audio buffer
     uint32_t        audioBufferSize;        ///    Size of host audio buffer (bytes)
-    uint32_t        audioDataSize;            ///    Size of audio data (bytes)
+    uint32_t        audioDataSize;          ///    Size of audio data (bytes)
+
+    uint32_t        frameNumber;            /// Frame number
     uint64_t        timeStamp;              /// Time stamp of video data
-    bool            lastFrame;                /// Indicates last captured frame
+    bool            lastFrame;              /// Indicates last captured frame
 } AjaAudioBuff;
 
         
@@ -329,8 +332,8 @@ class NTV2GstAV
         AjaVideoBuff                            mHevcInputBuffer [VIDEO_RING_SIZE];           ///    My Hevc input buffers
         AJACircularBuffer <AjaVideoBuff *>      mHevcInputCircularBuffer;                     ///    My Hevc input ring
 
-        AjaVideoBuff                            mVideoOutBuffer [VIDEO_ARRAY_SIZE];         ///    Video out buffers passed using callback
-        AjaAudioBuff                            mAudioOutBuffer [AUDIO_ARRAY_SIZE];         ///    Audio out buffers passed using callback
+        GstBufferPool *                         mAudioBufferPool;
+        GstBufferPool *                         mVideoBufferPool;
 
 
         AUTOCIRCULATE_TRANSFER        mInputTransferStruct;                                    ///    My A/C input transfer info
