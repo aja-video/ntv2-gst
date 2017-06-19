@@ -2,6 +2,7 @@
     @file        ntv2capture.h
     @brief        Declares the NTV2Capture class.
     @copyright    Copyright (C) 2012-2015 AJA Video Systems, Inc.  All rights reserved.
+                  Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
 **/
 
 

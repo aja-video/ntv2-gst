@@ -1,5 +1,6 @@
 /* GStreamer
  * Copyright (C) 2015 PSM <philm@aja.com>
+ * Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
