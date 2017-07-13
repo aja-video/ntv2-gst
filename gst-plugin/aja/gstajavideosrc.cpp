@@ -868,6 +868,10 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     
     AjaCaptureVideoFrame *f;
     GstCaps *caps;
+    GstClockTime capture_time, stream_time;
+    gboolean timecode_valid;
+    guint32 timecode_high, timecode_low;
+    guint8 aja_field_count;
     
     g_mutex_lock (&src->lock);
     while (g_queue_is_empty (&src->current_frames) && !src->flushing)
@@ -906,11 +910,19 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     //printf("data_size = %ld\n", data_size);
     
     *buffer = gst_buffer_ref (f->video_buff->buffer);
+    capture_time = f->capture_time;
+    stream_time = f->stream_time;
+    timecode_valid = f->video_buff->timeCodeValid;
+    aja_field_count = f->video_buff->fieldCount;
+    timecode_high = f->video_buff->timeCodeHigh;
+    timecode_low = f->video_buff->timeCodeLow;
+    aja_capture_video_frame_free (f);
+    f = NULL;
     
-    GST_BUFFER_TIMESTAMP (*buffer) = f->capture_time;
+    GST_BUFFER_TIMESTAMP (*buffer) = capture_time;
     GST_BUFFER_DURATION (*buffer) = GST_CLOCK_TIME_NONE;
 
-    if (f->video_buff->timeCodeValid) {
+    if (timecode_valid) {
       uint8_t hours, minutes, seconds, frames;
       GstVideoTimeCodeFlags flags = GST_VIDEO_TIME_CODE_FLAGS_NONE;
       guint field_count = 0;
@@ -918,7 +930,7 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
       if (src->input->mode->isInterlaced) {
         flags = (GstVideoTimeCodeFlags) (flags | GST_VIDEO_TIME_CODE_FLAGS_INTERLACED);
-        field_count = f->video_buff->fieldCount == 0 ? 2 : f->video_buff->fieldCount;
+        field_count = aja_field_count == 0 ? 2 : aja_field_count;
       }
 
       // Any better way to detect this?
@@ -926,14 +938,14 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
         flags = (GstVideoTimeCodeFlags) (flags | GST_VIDEO_TIME_CODE_FLAGS_DROP_FRAME);
       }
 
-      hours = (((f->video_buff->timeCodeHigh & RP188_HOURTENS_MASK) >> 24) * 10) +
-              ((f->video_buff->timeCodeHigh & RP188_HOURUNITS_MASK) >> 16);
-      minutes = (((f->video_buff->timeCodeHigh & RP188_MINUTESTENS_MASK) >> 8) * 10) +
-              (f->video_buff->timeCodeHigh & RP188_MINUTESUNITS_MASK);
-      seconds = (((f->video_buff->timeCodeLow & RP188_SECONDTENS_MASK) >> 24) * 10) +
-              ((f->video_buff->timeCodeLow & RP188_SECONDUNITS_MASK) >> 16);
-      frames = (((f->video_buff->timeCodeLow & RP188_FRAMETENS_MASK) >> 8) * 10) +
-              (f->video_buff->timeCodeLow & RP188_FRAMEUNITS_MASK);
+      hours = (((timecode_high & RP188_HOURTENS_MASK) >> 24) * 10) +
+              ((timecode_high & RP188_HOURUNITS_MASK) >> 16);
+      minutes = (((timecode_high & RP188_MINUTESTENS_MASK) >> 8) * 10) +
+              (timecode_high & RP188_MINUTESUNITS_MASK);
+      seconds = (((timecode_low & RP188_SECONDTENS_MASK) >> 24) * 10) +
+              ((timecode_low & RP188_SECONDUNITS_MASK) >> 16);
+      frames = (((timecode_low & RP188_FRAMETENS_MASK) >> 8) * 10) +
+              (timecode_low & RP188_FRAMEUNITS_MASK);
 
       gst_video_time_code_init (&tc, src->input->mode->fps_n, src->input->mode->fps_d, NULL, flags,
             hours, minutes, seconds, frames, field_count);
@@ -943,17 +955,16 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
 #if GST_CHECK_VERSION (1, 13, 0)
     gst_buffer_add_reference_timestamp_meta (*buffer,
-        gst_static_caps_get (&stream_reference), f->stream_time,
+        gst_static_caps_get (&stream_reference), stream_time,
         GST_CLOCK_TIME_NONE);
 #endif
-    
+
 #if 1
     GST_DEBUG_OBJECT (src,
                       "Outputting buffer %p with timestamp %" GST_TIME_FORMAT " and duration %"
                       GST_TIME_FORMAT, *buffer, GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (*buffer)),
                       GST_TIME_ARGS (GST_BUFFER_DURATION (*buffer)));
 #endif
-    aja_capture_video_frame_free (f);
 
     return flow_ret;
 }

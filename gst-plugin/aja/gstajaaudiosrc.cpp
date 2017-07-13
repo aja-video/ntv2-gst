@@ -695,7 +695,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     gsize data_size;
     AjaCaptureAudioPacket *p;
     
-    GstClockTime timestamp, duration;
+    GstClockTime timestamp, stream_time, duration;
     GstClockTime start_time, end_time;
     guint64 start_offset, end_offset;
     gboolean discont = FALSE;
@@ -726,6 +726,9 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     *buffer = gst_buffer_ref (p->audio_buff->buffer);
     
     timestamp = p->capture_time;
+    stream_time = p->stream_time;
+    aja_capture_audio_packet_free (p);
+    p = NULL;
     
     // Jitter and discontinuity handling, based on audiobasesrc
     start_time = timestamp;
@@ -804,7 +807,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
 #if GST_CHECK_VERSION (1, 13, 0)
     gst_buffer_add_reference_timestamp_meta (*buffer,
-        gst_static_caps_get (&stream_reference), p->stream_time,
+        gst_static_caps_get (&stream_reference), stream_time,
         NULL);
 #endif
     
@@ -814,9 +817,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
                       GST_TIME_FORMAT, *buffer, GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (*buffer)),
                       GST_TIME_ARGS (GST_BUFFER_DURATION (*buffer)));
 #endif
-    
-    aja_capture_audio_packet_free (p);
-    
+
     return flow_ret;
 }
 
