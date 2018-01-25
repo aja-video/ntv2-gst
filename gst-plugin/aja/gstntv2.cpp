@@ -851,6 +851,38 @@ void NTV2GstAV::ACInputThreadStatic (AJAThread * pThread, void * pContext)
 
 void NTV2GstAV::ACInputWorker (void)
 {
+    // Choose timecode source
+    NTV2TCIndex tcIndex;
+    switch (mInputChannel)
+    {
+    case NTV2_CHANNEL1:
+        tcIndex = NTV2_TCINDEX_SDI1_LTC;
+        break;
+    case NTV2_CHANNEL2:
+        tcIndex = NTV2_TCINDEX_SDI2_LTC;
+        break;
+    case NTV2_CHANNEL3:
+        tcIndex = NTV2_TCINDEX_SDI3_LTC;
+        break;
+    case NTV2_CHANNEL4:
+        tcIndex = NTV2_TCINDEX_SDI4_LTC;
+        break;
+    case NTV2_CHANNEL5:
+        tcIndex = NTV2_TCINDEX_SDI5_LTC;
+        break;
+    case NTV2_CHANNEL6:
+        tcIndex = NTV2_TCINDEX_SDI6_LTC;
+        break;
+    case NTV2_CHANNEL7:
+        tcIndex = NTV2_TCINDEX_SDI7_LTC;
+        break;
+    case NTV2_CHANNEL8:
+        tcIndex = NTV2_TCINDEX_SDI8_LTC;
+        break;
+    default:
+        tcIndex = NTV2_TCINDEX_DEFAULT;
+    }
+
     // start AutoCirculate running...
     mDevice.AutoCirculateStart (mInputChannel);
 
@@ -918,7 +950,7 @@ void NTV2GstAV::ACInputWorker (void)
             if (mWithAnc)
             {
                 NTV2_RP188 timeCode;
-                if (mInputTransferStruct.acTransferStatus.acFrameStamp.GetInputTimeCode(timeCode)) {
+                if (mInputTransferStruct.acTransferStatus.acFrameStamp.GetInputTimeCode(timeCode, tcIndex)) {
                   // get the sdi input anc data
                   pVideoData->timeCodeDBB = timeCode.fDBB;
                   pVideoData->timeCodeLow = timeCode.fLo;
