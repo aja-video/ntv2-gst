@@ -59,6 +59,8 @@ struct _GstAjaVideoSrc
     guint                       input_channel;
     gboolean                    output_stream_time;
     GstClockTime                skip_first_time;
+    gboolean                    output_cc;
+    gint			last_cc_vbi_line;
 
     GstClockTime first_time;
     GstClockTime *times;

@@ -24,6 +24,7 @@
 
 #include "gstajavideosrc.h"
 #include "gstajavideosrc.h"
+#include <gst/video/video-vbi.h>
 
 
 GST_DEBUG_CATEGORY_STATIC (gst_aja_video_src_debug);
@@ -35,6 +36,7 @@ GST_DEBUG_CATEGORY_STATIC (gst_aja_video_src_debug);
 #define DEFAULT_QUEUE_SIZE         (5)
 #define DEFAULT_OUTPUT_STREAM_TIME (FALSE)
 #define DEFAULT_SKIP_FIRST_TIME    (0)
+#define DEFAULT_OUTPUT_CC	   (FALSE)
 
 enum
 {
@@ -45,6 +47,7 @@ enum
   PROP_QUEUE_SIZE,
   PROP_OUTPUT_STREAM_TIME,
   PROP_SKIP_FIRST_TIME,
+  PROP_OUTPUT_CC
 };
 
 typedef struct
@@ -164,6 +167,12 @@ gst_aja_video_src_class_init (GstAjaVideoSrcClass * klass)
           G_MAXUINT64, DEFAULT_SKIP_FIRST_TIME,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
+  g_object_class_install_property (gobject_class, PROP_OUTPUT_CC,
+      g_param_spec_boolean ("output-cc", "Output Closed Caption",
+          "Extract and output CC as GstMeta (if present)",
+          DEFAULT_OUTPUT_CC,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+
   templ_caps = gst_aja_mode_get_template_caps_raw ();
   gst_element_class_add_pad_template (element_class,
       gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS, templ_caps));
@@ -237,6 +246,9 @@ gst_aja_video_src_set_property (GObject * object, guint property_id,
       src->skip_first_time = g_value_get_uint64 (value);
       break;
 
+    case PROP_OUTPUT_CC:
+      src->output_cc = g_value_get_boolean (value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -275,6 +287,9 @@ gst_aja_video_src_get_property (GObject * object, guint property_id,
       g_value_set_uint64 (value, src->skip_first_time);
       break;
 
+    case PROP_OUTPUT_CC:
+      g_value_set_boolean (value, src->output_cc);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -472,7 +487,9 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
       src->input->mode->videoFormat,
       src->input->mode->bitDepth,
       src->input->mode->is422,
-      false, false, src->input->mode->isQuad, false, false);
+      false,
+      false,
+      src->input->mode->isQuad, false, false, src->output_cc ? true : false);
   if (!AJA_SUCCESS (status)) {
     GST_ERROR_OBJECT (src, "Failed to initialize input");
     g_mutex_unlock (&src->input->lock);
@@ -847,6 +864,88 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
   g_mutex_unlock (&src->lock);
 }
 
+static void
+extract_cc_from_vbi (GstAjaVideoSrc * src, GstBuffer ** buffer,
+    guint8 * ancillary_data)
+{
+  gint i;
+  gboolean found = FALSE;
+  gsize linewidth;
+  GstVideoVBIParser *parser = NULL;
+  GstClockTime before, after;
+
+  before = gst_util_get_timestamp ();
+
+  switch (src->input->mode->height) {
+    case 720:
+      if (src->input->mode->bitDepth == 8) {
+        linewidth = 1280 * 2;
+        parser = gst_video_vbi_parser_new (GST_VIDEO_FORMAT_UYVY, 1280);
+      } else {
+        linewidth = 1296 * 16 / 6;
+        parser = gst_video_vbi_parser_new (GST_VIDEO_FORMAT_v210, 1280);
+      }
+      break;
+    case 1080:
+      if (src->input->mode->bitDepth == 8) {
+        linewidth = 1920 * 2;
+        parser = gst_video_vbi_parser_new (GST_VIDEO_FORMAT_UYVY, 1920);
+      } else {
+        linewidth = 1920 * 16 / 6;
+        parser = gst_video_vbi_parser_new (GST_VIDEO_FORMAT_v210, 1920);
+      }
+      break;
+    default:
+      GST_ERROR ("Unsupported format for ancillary data !");
+      linewidth = 255;
+      break;
+  }
+
+  if (!parser)
+    return;
+
+  i = src->last_cc_vbi_line;
+  if (i == -1)
+    i = 0;
+  ancillary_data += i * linewidth;
+
+  while (i < 15 && !found) {
+    GstVideoAncillary gstanc;
+    GST_DEBUG ("Analyzing data on line %d", i);
+    GST_MEMDUMP ("line data", ancillary_data, 255);
+
+    gst_video_vbi_parser_add_line (parser, ancillary_data);
+    while (gst_video_vbi_parser_get_ancillary (parser,
+            &gstanc) == GST_VIDEO_VBI_PARSER_RESULT_OK) {
+      if (GST_VIDEO_ANCILLARY_DID16 (&gstanc) ==
+          GST_VIDEO_ANCILLARY_DID16_S334_EIA_708) {
+        GST_DEBUG_OBJECT (src,
+            "Adding CEA-708 CDP meta to buffer from line %d", i);
+        GST_MEMDUMP_OBJECT (src, "CDP", gstanc.data, gstanc.data_count);
+        gst_buffer_add_video_caption_meta (*buffer,
+            GST_VIDEO_CAPTION_TYPE_CEA708_CDP, gstanc.data, gstanc.data_count);
+        found = TRUE;
+        src->last_cc_vbi_line = i;
+        break;
+      }
+    }
+
+    ancillary_data += linewidth;
+    i++;
+  }
+
+  // If we didn't find any CC, restart from the first VBI line next time
+  if (!found) {
+    GST_DEBUG_OBJECT (src, "Didn't find any CC in this frame");
+    src->last_cc_vbi_line = -1;
+  }
+
+  after = gst_util_get_timestamp ();
+  GST_LOG ("Getting CC took %" GST_TIME_FORMAT,
+      GST_TIME_ARGS (after - before));
+  gst_video_vbi_parser_free (parser);
+}
+
 /* ask the subclass to create a buffer with offset and size, the default
  * implementation will call alloc and fill. */
 static GstFlowReturn
@@ -865,6 +964,7 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
   gboolean timecode_valid;
   guint32 timecode_high, timecode_low;
   guint8 aja_field_count;
+  guint8 *ancillary_data;
 
   g_mutex_lock (&src->lock);
   while (g_queue_is_empty (&src->current_frames) && !src->flushing) {
@@ -893,6 +993,7 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     gst_element_post_message (GST_ELEMENT_CAST (src),
         gst_message_new_latency (GST_OBJECT_CAST (src)));
     gst_caps_unref (caps);
+    src->last_cc_vbi_line = -1;
   } else {
     g_mutex_unlock (&src->lock);
   }
@@ -906,6 +1007,7 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
   aja_field_count = f->video_buff->fieldCount;
   timecode_high = f->video_buff->timeCodeHigh;
   timecode_low = f->video_buff->timeCodeLow;
+  ancillary_data = (guint8 *) f->video_buff->pAncillaryData;
   aja_capture_video_frame_free (f);
   f = NULL;
 
@@ -952,6 +1054,8 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
       GST_CLOCK_TIME_NONE);
 #endif
 
+  if (ancillary_data && src->output_cc)
+    extract_cc_from_vbi (src, buffer, ancillary_data);
 #if 1
   GST_DEBUG_OBJECT (src,
       "Outputting buffer %p with timestamp %" GST_TIME_FORMAT " and duration %"

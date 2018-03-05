@@ -45,6 +45,7 @@ typedef struct
     uint32_t *      pVideoBuffer;           /// Pointer to host video buffer
     uint32_t        videoBufferSize;        /// Size of host video buffer (bytes)
     uint32_t        videoDataSize;          /// Size of video data (bytes)
+    uint32_t *      pAncillaryData;           /// Pointer to host ancillary data
 
     uint32_t *      pInfoBuffer;            /// Picture information (raw) or encode information (hevc)
     uint32_t        infoBufferSize;         /// Size of the host information buffer (bytes)
@@ -104,6 +105,8 @@ class NTV2GstAV
                                             Defaults to no timecode burn.
             @param[in]    inInfoData          Use picture and encoded information.
                                             Defaults to no info data.
+            @param[in]    inCaptureTall       Capture Tall Video (i.e. with VBI)
+                                            Defaults to regular (non-tall) video height
         **/
         NTV2GstAV(const std::string            inDeviceSpecifier    = "0",
                       const NTV2Channel            inChannel            = NTV2_CHANNEL1);
@@ -127,7 +130,8 @@ class NTV2GstAV
                                 const bool                      inHevcOutput    = false,
                                 const bool                      inQuadMode      = false,
                                 const bool                      inTimeCode      = false,
-                                const bool                      inInfoData      = false);
+                                const bool                      inInfoData      = false,
+				const bool                      inCaptureTall   = false);
 
         virtual AJAStatus InitAudio (uint32_t *numAudioChannels);
 
@@ -311,6 +315,7 @@ class NTV2GstAV
         bool                        mMultiStream;            /// Demonstrates how to configure the board for multi-stream
         bool                        mWithInfo;              /// Demonstrates how to configure picture information mode
         bool                        mWithAnc;               /// Add timecode burn
+	bool                        mCaptureTall;	    /// Capture Tall Video
         NTV2AudioSystem                mAudioSystem;            ///    The audio system I'm using
                 uint32_t                                mNumAudioChannels;
         bool                        mLastFrame;                ///    Set "true" to signal last frame

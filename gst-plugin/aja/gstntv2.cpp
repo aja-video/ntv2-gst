@@ -14,8 +14,22 @@
 #include "ajabase/system/process.h"
 #include "ajabase/system/systemtime.h"
 
+GST_DEBUG_CATEGORY_STATIC (gst_ntv2_debug);
+#define GST_CAT_DEFAULT gst_ntv2_debug
+
 #define NTV2_AUDIOSIZE_MAX        (401 * 1024)
 
+static void
+_init_ntv2_debug (void)
+{
+#ifndef GST_DISABLE_GST_DEBUG
+  static volatile gsize _init = 0;
+
+  if (g_once_init_enter (&_init)) {
+    GST_DEBUG_CATEGORY_INIT (gst_ntv2_debug, "ajantv2", 0, "AJA ntv2");
+  }
+#endif
+}
 
 NTV2GstAV::NTV2GstAV (const string inDeviceSpecifier,
     const NTV2Channel inChannel)
@@ -59,6 +73,7 @@ mCodecHevcFrameCount (0), mHevcOutFrameCount (0), mAudioOutFrameCount (0)
 {
   ::memset (mHevcInputBuffer, 0x0, sizeof (mHevcInputBuffer));
 
+  _init_ntv2_debug ();
 }                               //    constructor
 
 
@@ -120,7 +135,8 @@ AJAStatus
     const bool inIs422,
     const bool inIsAuto,
     const bool inHevcOutput,
-    const bool inQuadMode, const bool inTimeCode, const bool inInfoData)
+    const bool inQuadMode,
+    const bool inTimeCode, const bool inInfoData, const bool inCaptureTall)
 {
   AJAStatus status (AJA_STATUS_SUCCESS);
 
@@ -133,6 +149,7 @@ AJAStatus
   mQuad = inQuadMode;
   mWithAnc = inTimeCode;
   mWithInfo = inInfoData;
+  mCaptureTall = inCaptureTall;
 
   //  If we are in auto mode then do nothing if we are already running, otherwise force raw, 422, 8 bit.
   //  This flag shoud only be driven by the audiosrc to either start a non running channel without having
@@ -648,6 +665,18 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   mTimeBase.SetAJAFrameRate (GetAJAFrameRate (GetNTV2FrameRateFromVideoFormat
           (mVideoFormat)));
 
+  // VANC handling
+  if (mCaptureTall) {
+    GST_DEBUG ("Asking to enable VANC Data");
+    mDevice.SetEnableVANCData (true, false, mInputChannel);
+    if (mPixelFormat == NTV2_FBF_8BIT_YCBCR) {
+      GST_DEBUG ("8bit, asking to shift VANC");
+      if (!mDevice.SetVANCShiftMode (mInputChannel,
+              NTV2_VANCDATA_8BITSHIFT_ENABLE))
+        GST_WARNING ("Failed to request 8bit VANC shift");
+    }
+  }
+
   return AJA_STATUS_SUCCESS;
 
 }                               //    SetupVideo
@@ -982,8 +1011,36 @@ NTV2GstAV::ACInputWorker (void)
       // get the video data size
       pVideoData->videoDataSize = pVideoData->videoBufferSize;
       if (pVideoData->buffer) {
+        NTV2FrameGeometry currentGeometry;
+        gsize offset = 0;       // Offset in number of lines
+        mDevice.GetFrameGeometry (&currentGeometry);
+        switch (currentGeometry) {
+          case NTV2_FG_1920x1112:
+            // 30 line offset (or 32?)
+            // FIXME : Remove hardcording once gstntv2 is gstvideoformat aware
+            if (mBitDepth == 8)
+              offset = 30 * 1920 * 2;
+            else
+              offset = 30 * 1920 * 16 / 6;
+            break;
+          case NTV2_FG_1280x740:
+            // 19 line offset (or 20 ?)
+            // FIXME : Remove hardcording once gstntv2 is gstvideoformat aware
+            if (mBitDepth == 8)
+              offset = 19 * 1280 * 2;
+            else
+              offset = 19 * 1296 * 16 / 6;
+            break;
+          default:
+            GST_ERROR ("UNKNOWN GEOMETRY !");
+            break;
+        }
+        GST_DEBUG ("offset %" G_GSIZE_FORMAT, offset);
+        GST_DEBUG ("videoDataSize %u", pVideoData->videoDataSize);
         gst_buffer_unmap (pVideoData->buffer, &video_map);
-        gst_buffer_resize (pVideoData->buffer, 0, pVideoData->videoDataSize);
+        gst_buffer_resize (pVideoData->buffer, offset,
+            pVideoData->videoDataSize - offset);
+        pVideoData->pAncillaryData = pVideoData->pVideoBuffer;
         pVideoData->pVideoBuffer = NULL;
       }
       pVideoData->lastFrame = mLastFrame;

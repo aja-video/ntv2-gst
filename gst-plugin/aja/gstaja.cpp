@@ -536,13 +536,13 @@ static void
 gst_aja_buffer_pool_reset_buffer (GstBufferPool * pool, GstBuffer * buffer)
 {
   GstAjaBufferPool *aja_pool = GST_AJA_BUFFER_POOL (pool);
-  gsize maxsize, size;
+  gsize maxsize, size, offset;
 
   // Update size again to the maximum, we might've made the buffer
   // smaller because we got less data than the maximum
-  size = gst_buffer_get_sizes (buffer, NULL, &maxsize);
+  size = gst_buffer_get_sizes (buffer, &offset, &maxsize);
   if (size != aja_pool->size && aja_pool->size < maxsize) {
-    gst_buffer_resize (buffer, 0, aja_pool->size);
+    gst_buffer_resize (buffer, -offset, aja_pool->size);
     size = aja_pool->size;
   }
   if (size == aja_pool->size && gst_buffer_n_memory (buffer) == 1)
