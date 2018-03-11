@@ -718,7 +718,8 @@ void
 NTV2GstAV::SetupHostBuffers (void)
 {
   mVideoBufferSize =
-      GetVideoActiveSize (mVideoFormat, mPixelFormat, NTV2_VANCMODE_OFF);
+      GetVideoActiveSize (mVideoFormat, mPixelFormat,
+      mCaptureTall ? NTV2_VANCMODE_TALL : NTV2_VANCMODE_OFF);
   mPicInfoBufferSize = sizeof (HevcPictureInfo) * 2;
   mEncInfoBufferSize = sizeof (HevcEncodedInfo) * 2;
   mAudioBufferSize = NTV2_AUDIOSIZE_MAX;
