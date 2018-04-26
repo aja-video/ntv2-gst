@@ -1033,7 +1033,8 @@ NTV2GstAV::ACInputWorker (void)
               offset = 19 * 1296 * 16 / 6;
             break;
           default:
-            GST_ERROR ("UNKNOWN GEOMETRY !");
+            if (mCaptureTall)
+              GST_ERROR ("UNKNOWN GEOMETRY !");
             break;
         }
         GST_DEBUG ("offset %" G_GSIZE_FORMAT, offset);
