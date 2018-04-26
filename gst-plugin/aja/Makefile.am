@@ -35,9 +35,9 @@ libgstaja_la_SOURCES = \
 	gstaja.cpp \
 	gstajavideosrc.cpp \
 	gstajaaudiosrc.cpp \
-	gstajavideosink.cpp \
-	gstajaaudiosink.cpp \
 	gstntv2.cpp
+#	gstajavideosink.cpp
+#	gstajaaudiosink.cpp
 #	gstajahevcsrc.cpp
 
 # headers we need but don't want installed
@@ -45,7 +45,7 @@ noinst_HEADERS = \
 	gstaja.h \
 	gstajavideosrc.h \
 	gstajaaudiosrc.cpp \
-	gstajavideosink.cpp \
-	gstajaaudiosink.cpp \
 	gstntv2.h
 #	gstajahevcsrc.h
+#	gstajavideosink.cpp
+#	gstajaaudiosink.cpp
