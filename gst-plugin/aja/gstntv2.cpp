@@ -276,6 +276,11 @@ NTV2GstAV::Quit (void)
 
   //  Stop video capture
   mDevice.SetMode (mInputChannel, NTV2_MODE_DISPLAY, false);
+  if (mQuad) {
+    mDevice.SetMode (NTV2_CHANNEL2, NTV2_MODE_DISPLAY, false);
+    mDevice.SetMode (NTV2_CHANNEL3, NTV2_MODE_DISPLAY, false);
+    mDevice.SetMode (NTV2_CHANNEL4, NTV2_MODE_DISPLAY, false);
+  }
 }
 
 
