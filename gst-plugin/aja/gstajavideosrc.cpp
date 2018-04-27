@@ -32,7 +32,9 @@ GST_DEBUG_CATEGORY_STATIC (gst_aja_video_src_debug);
 
 #define DEFAULT_MODE               (GST_AJA_MODE_RAW_720_8_5994p)
 #define DEFAULT_DEVICE_IDENTIFIER  ("0")
+#define DEFAULT_INPUT_MODE         (GST_AJA_VIDEO_INPUT_MODE_SDI)
 #define DEFAULT_INPUT_CHANNEL      (0)
+#define DEFAULT_PASSTHROUGH        (FALSE)
 #define DEFAULT_QUEUE_SIZE         (5)
 #define DEFAULT_OUTPUT_STREAM_TIME (FALSE)
 #define DEFAULT_SKIP_FIRST_TIME    (0)
@@ -43,7 +45,9 @@ enum
   PROP_0,
   PROP_MODE,
   PROP_DEVICE_IDENTIFIER,
+  PROP_INPUT_MODE,
   PROP_INPUT_CHANNEL,
+  PROP_PASSTHROUGH,
   PROP_QUEUE_SIZE,
   PROP_OUTPUT_STREAM_TIME,
   PROP_SKIP_FIRST_TIME,
@@ -140,11 +144,26 @@ gst_aja_video_src_class_init (GstAjaVideoSrcClass * klass)
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               G_PARAM_CONSTRUCT)));
 
+  g_object_class_install_property (gobject_class, PROP_INPUT_MODE,
+      g_param_spec_enum ("input-mode", "Input Mode",
+          "Video Input Mode to use for playback",
+          GST_TYPE_AJA_VIDEO_INPUT_MODE, DEFAULT_INPUT_MODE,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+              G_PARAM_CONSTRUCT)));
+
   g_object_class_install_property (gobject_class, PROP_INPUT_CHANNEL,
       g_param_spec_uint ("input-channel",
           "Input channel",
           "Input channel to use",
           0, G_MAXINT, DEFAULT_INPUT_CHANNEL,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+              G_PARAM_CONSTRUCT)));
+
+  g_object_class_install_property (gobject_class, PROP_PASSTHROUGH,
+      g_param_spec_boolean ("passthrough",
+          "Passthrough",
+          "Passthrough on bidirectional devices by halfing the number of input channels",
+          DEFAULT_PASSTHROUGH,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               G_PARAM_CONSTRUCT)));
 
@@ -192,6 +211,8 @@ gst_aja_video_src_init (GstAjaVideoSrc * src)
 
   src->modeEnum = DEFAULT_MODE;
   src->input_channel = DEFAULT_INPUT_CHANNEL;
+  src->input_mode = DEFAULT_INPUT_MODE;
+  src->passthrough = DEFAULT_PASSTHROUGH;
   src->device_identifier = g_strdup (DEFAULT_DEVICE_IDENTIFIER);
   src->queue_size = DEFAULT_QUEUE_SIZE;
   src->output_stream_time = DEFAULT_OUTPUT_STREAM_TIME;
@@ -230,8 +251,16 @@ gst_aja_video_src_set_property (GObject * object, guint property_id,
       src->device_identifier = g_value_dup_string (value);
       break;
 
+    case PROP_INPUT_MODE:
+      src->input_mode = (GstAjaVideoInputMode) g_value_get_enum (value);
+      break;
+
     case PROP_INPUT_CHANNEL:
       src->input_channel = g_value_get_uint (value);
+      break;
+
+    case PROP_PASSTHROUGH:
+      src->passthrough = g_value_get_boolean (value);
       break;
 
     case PROP_QUEUE_SIZE:
@@ -271,8 +300,16 @@ gst_aja_video_src_get_property (GObject * object, guint property_id,
       g_value_set_string (value, src->device_identifier);
       break;
 
+    case PROP_INPUT_MODE:
+      g_value_set_enum (value, src->input_mode);
+      break;
+
     case PROP_INPUT_CHANNEL:
       g_value_set_uint (value, src->input_channel);
+      break;
+
+    case PROP_PASSTHROUGH:
+      g_value_set_boolean (value, src->passthrough);
       break;
 
     case PROP_QUEUE_SIZE:
@@ -459,6 +496,8 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
 {
   AJAStatus status;
   const GstAjaMode *mode;
+  NTV2InputSource input_source;
+
   GST_DEBUG_OBJECT (src, "open");
 
   src->input =
@@ -483,13 +522,33 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
     return FALSE;
   }
 
+  switch (src->input_mode) {
+    case GST_AJA_VIDEO_INPUT_MODE_SDI:
+      input_source = NTV2_INPUTSOURCE_SDI1;
+      break;
+
+    case GST_AJA_VIDEO_INPUT_MODE_HDMI:
+      input_source = NTV2_INPUTSOURCE_HDMI1;
+      break;
+
+    case GST_AJA_VIDEO_INPUT_MODE_ANALOG:
+      input_source = NTV2_INPUTSOURCE_ANALOG1;
+      break;
+
+    default:
+      g_assert_not_reached ();
+      break;
+  }
+
   status = src->input->ntv2AVHevc->Init (src->input->mode->videoPreset,
       src->input->mode->videoFormat,
+      input_source,
       src->input->mode->bitDepth,
       src->input->mode->is422,
       false,
       false,
-      src->input->mode->isQuad, false, false, src->output_cc ? true : false);
+      src->input->mode->isQuad, false, false, src->output_cc ? true : false,
+      src->passthrough ? true : false);
   if (!AJA_SUCCESS (status)) {
     GST_ERROR_OBJECT (src, "Failed to initialize input");
     g_mutex_unlock (&src->input->lock);

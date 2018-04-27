@@ -43,8 +43,8 @@
 GST_DEBUG_CATEGORY_STATIC (gst_aja_audio_src_debug);
 #define GST_CAT_DEFAULT gst_aja_audio_src_debug
 
-#define DEFAULT_CONNECTION      (GST_AJA_AUDIO_CONNECTION_AUTO)
 #define DEFAULT_DEVICE_IDENTIFIER ("0")
+#define DEFAULT_INPUT_MODE      (GST_AJA_AUDIO_INPUT_MODE_EMBEDDED)
 #define DEFAULT_INPUT_CHANNEL   (0)
 #define DEFAULT_CHANNELS        (8)
 #define DEFAULT_QUEUE_SIZE      (5)
@@ -56,6 +56,7 @@ enum
 {
   PROP_0,
   PROP_DEVICE_IDENTIFIER,
+  PROP_INPUT_MODE,
   PROP_INPUT_CHANNEL,
   PROP_CHANNELS,
   PROP_ALIGNMENT_THRESHOLD,
@@ -158,6 +159,13 @@ gst_aja_audio_src_class_init (GstAjaAudioSrcClass * klass)
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               G_PARAM_CONSTRUCT)));
 
+  g_object_class_install_property (gobject_class, PROP_INPUT_MODE,
+      g_param_spec_enum ("input-mode", "Input Mode",
+          "Audio Input Mode to use for playback",
+          GST_TYPE_AJA_AUDIO_INPUT_MODE, DEFAULT_INPUT_MODE,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+              G_PARAM_CONSTRUCT)));
+
   g_object_class_install_property (gobject_class, PROP_INPUT_CHANNEL,
       g_param_spec_uint ("input-channel",
           "Input channel",
@@ -214,6 +222,7 @@ gst_aja_audio_src_init (GstAjaAudioSrc * src)
   GST_DEBUG_OBJECT (src, "init");
 
   src->input_channel = DEFAULT_INPUT_CHANNEL;
+  src->input_mode = DEFAULT_INPUT_MODE;
   src->device_identifier = g_strdup (DEFAULT_DEVICE_IDENTIFIER);
   src->channels = DEFAULT_CHANNELS;
   src->queue_size = DEFAULT_QUEUE_SIZE;
@@ -240,6 +249,10 @@ gst_aja_audio_src_set_property (GObject * object, guint property_id,
     case PROP_DEVICE_IDENTIFIER:
       g_free (src->device_identifier);
       src->device_identifier = g_value_dup_string (value);
+      break;
+
+    case PROP_INPUT_MODE:
+      src->input_mode = (GstAjaAudioInputMode) g_value_get_enum (value);
       break;
 
     case PROP_INPUT_CHANNEL:
@@ -278,6 +291,10 @@ gst_aja_audio_src_get_property (GObject * object, guint property_id,
   switch (property_id) {
     case PROP_DEVICE_IDENTIFIER:
       g_value_set_string (value, src->device_identifier);
+      break;
+
+    case PROP_INPUT_MODE:
+      g_value_set_enum (value, src->input_mode);
       break;
 
     case PROP_INPUT_CHANNEL:
@@ -469,6 +486,8 @@ static gboolean
 gst_aja_audio_src_open (GstAjaAudioSrc * src)
 {
   AJAStatus status;
+  NTV2AudioSource audio_source;
+
   GST_DEBUG_OBJECT (src, "open");
 
   src->input =
@@ -487,7 +506,29 @@ gst_aja_audio_src_open (GstAjaAudioSrc * src)
     return FALSE;
   }
 
-  status = src->input->ntv2AVHevc->InitAudio (&src->channels);
+  switch (src->input_mode) {
+    case GST_AJA_AUDIO_INPUT_MODE_EMBEDDED:
+      audio_source = NTV2_AUDIO_EMBEDDED;
+      break;
+
+    case GST_AJA_AUDIO_INPUT_MODE_HDMI:
+      audio_source = NTV2_AUDIO_HDMI;
+      break;
+
+    case GST_AJA_AUDIO_INPUT_MODE_AES:
+      audio_source = NTV2_AUDIO_AES;
+      break;
+
+    case GST_AJA_AUDIO_INPUT_MODE_ANALOG:
+      audio_source = NTV2_AUDIO_ANALOG;
+      break;
+
+    default:
+      g_assert_not_reached ();
+      break;
+  }
+
+  status = src->input->ntv2AVHevc->InitAudio (audio_source, &src->channels);
   if (status != AJA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (src, "Failed to initialize audio");
     g_mutex_unlock (&src->input->lock);

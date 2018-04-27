@@ -397,6 +397,48 @@ gst_aja_get_mode_hevc (GstAjaModeHevcEnum e)
   return &modesHevc[e];
 }
 
+GType
+gst_aja_video_input_mode_get_type (void)
+{
+    static gsize id = 0;
+    static const GEnumValue modes[] =
+    {
+        {GST_AJA_VIDEO_INPUT_MODE_SDI,     "sdi",              "SDI"},
+        {GST_AJA_VIDEO_INPUT_MODE_HDMI,    "hdmi",             "HDMI"},
+        {GST_AJA_VIDEO_INPUT_MODE_ANALOG,  "analog",           "Analog"},
+        {0,                                 NULL,               NULL}
+    };
+    
+    if (g_once_init_enter (&id))
+    {
+        GType tmp = g_enum_register_static ("GstAjaVideoInputMode", modes);
+        g_once_init_leave (&id, tmp);
+    }
+    
+    return (GType) id;
+}
+
+GType
+gst_aja_audio_input_mode_get_type (void)
+{
+    static gsize id = 0;
+    static const GEnumValue modes[] =
+    {
+        {GST_AJA_AUDIO_INPUT_MODE_EMBEDDED,"embedded",         "Embedded"},
+        {GST_AJA_AUDIO_INPUT_MODE_HDMI,    "hdmi",             "HDMI"},
+        {GST_AJA_AUDIO_INPUT_MODE_AES,     "aes",              "AES"},
+        {GST_AJA_AUDIO_INPUT_MODE_ANALOG,  "analog",           "Analog"},
+        {0,                                 NULL,               NULL}
+    };
+    
+    if (g_once_init_enter (&id))
+    {
+        GType tmp = g_enum_register_static ("GstAjaAudioInputMode", modes);
+        g_once_init_leave (&id, tmp);
+    }
+    
+    return (GType) id;
+}
 
 G_DEFINE_TYPE (GstAjaClock, gst_aja_clock, GST_TYPE_SYSTEM_CLOCK);
 

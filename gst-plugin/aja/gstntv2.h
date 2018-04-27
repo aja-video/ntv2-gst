@@ -10,9 +10,10 @@
 #define _NTV2ENCODEHEVC_H
 
 #include <gst/gst.h>
+
 #include "ntv2enums.h"
 #include "ntv2m31enums.h"
-
+#include "ntv2signalrouter.h"
 #include "ntv2devicescanner.h"
 #include "ntv2rp188.h"
 
@@ -124,6 +125,7 @@ class NTV2GstAV
         **/
         virtual AJAStatus Init (const M31VideoPreset            inPreset        = M31_FILE_720X480_420_8_5994i,
                                 const NTV2VideoFormat           inVideoFormat   = NTV2_FORMAT_525_5994,
+                                const NTV2InputSource           inInputSource   = NTV2_INPUTSOURCE_SDI1,
                                 const uint32_t                  inBitDepth      = 8,
                                 const bool                      inIs422         = false,
                                 const bool                      inIsAuto        = false,
@@ -131,9 +133,10 @@ class NTV2GstAV
                                 const bool                      inQuadMode      = false,
                                 const bool                      inTimeCode      = false,
                                 const bool                      inInfoData      = false,
-				const bool                      inCaptureTall   = false);
+				const bool                      inCaptureTall   = false,
+                                const bool                      inPassthrough   = false);
 
-        virtual AJAStatus InitAudio (uint32_t *numAudioChannels);
+        virtual AJAStatus InitAudio (const NTV2AudioSource inAudioSource, uint32_t *numAudioChannels);
 
         /**
             @brief    Gracefully stops me from running.
@@ -204,11 +207,6 @@ class NTV2GstAV
             @brief    Sets up everything I need for capturing audio.
         **/
         virtual AJAStatus        SetupAudio (void);
-
-        /**
-            @brief    Sets up device routing for capture.
-        **/
-        virtual void            RouteInputSignal (void);
 
         /**
             @brief    Sets/Frees up my circular aja_video_src->ntv2Hevc->buffers.
@@ -316,8 +314,11 @@ class NTV2GstAV
         bool                        mWithInfo;              /// Demonstrates how to configure picture information mode
         bool                        mWithAnc;               /// Add timecode burn
 	bool                        mCaptureTall;	    /// Capture Tall Video
-        NTV2AudioSystem                mAudioSystem;            ///    The audio system I'm using
-                uint32_t                                mNumAudioChannels;
+        NTV2InputSource             mVideoSource;
+        bool                        mPassthrough;
+        NTV2AudioSystem             mAudioSystem;            ///    The audio system I'm using
+        NTV2AudioSource             mAudioSource;
+        uint32_t                    mNumAudioChannels;
         bool                        mLastFrame;                ///    Set "true" to signal last frame
         bool                        mLastFrameInput;        ///    Set "true" to signal last frame captured from input
         bool                        mLastFrameVideoOut;     ///    Set "true" to signal last frame of video output

@@ -27,6 +27,7 @@ _init_ntv2_debug (void)
 
   if (g_once_init_enter (&_init)) {
     GST_DEBUG_CATEGORY_INIT (gst_ntv2_debug, "ajantv2", 0, "AJA ntv2");
+    g_once_init_leave (&_init, 1);
   }
 #endif
 }
@@ -113,6 +114,9 @@ AJAStatus NTV2GstAV::Open (void)
   mDevice.SetEveryFrameServices (NTV2_OEM_TASKS);       //    Since this is an OEM app, use the OEM service level
   mDeviceID = mDevice.GetDeviceID ();   //    Keep the device ID handy, as it's used frequently
 
+  // So we can configure each channel separately
+  mDevice.SetMultiFormatMode(true);
+
   return AJA_STATUS_SUCCESS;
 }
 
@@ -131,17 +135,22 @@ AJAStatus NTV2GstAV::Close (void)
 AJAStatus
     NTV2GstAV::Init (const M31VideoPreset inPreset,
     const NTV2VideoFormat inVideoFormat,
+    const NTV2InputSource inInputSource,
     const uint32_t inBitDepth,
     const bool inIs422,
     const bool inIsAuto,
     const bool inHevcOutput,
     const bool inQuadMode,
-    const bool inTimeCode, const bool inInfoData, const bool inCaptureTall)
+    const bool inTimeCode,
+    const bool inInfoData,
+    const bool inCaptureTall,
+    const bool inPassthrough)
 {
   AJAStatus status (AJA_STATUS_SUCCESS);
 
   mPreset = inPreset;
   mVideoFormat = inVideoFormat;
+  mVideoSource = inInputSource;
   mBitDepth = inBitDepth;
   mIs422 = inIs422;
   mIsAuto = inIsAuto;
@@ -150,6 +159,7 @@ AJAStatus
   mWithAnc = inTimeCode;
   mWithInfo = inInfoData;
   mCaptureTall = inCaptureTall;
+  mPassthrough = mPassthrough;
 
   //  If we are in auto mode then do nothing if we are already running, otherwise force raw, 422, 8 bit.
   //  This flag shoud only be driven by the audiosrc to either start a non running channel without having
@@ -167,65 +177,6 @@ AJAStatus
     mBitDepth = 8;
     mHevcOutput = false;
   }
-  // Figure out frame buffer format
-  if (mHevcOutput) {
-    if (mBitDepth == 8) {
-      if (mIs422)
-        mPixelFormat = NTV2_FBF_8BIT_YCBCR_422PL2;
-      else
-        mPixelFormat = NTV2_FBF_8BIT_YCBCR_420PL2;
-    } else {
-      if (mIs422)
-        mPixelFormat = NTV2_FBF_10BIT_YCBCR_422PL2;
-      else
-        mPixelFormat = NTV2_FBF_10BIT_YCBCR_420PL2;
-    }
-  } else {
-    if (mBitDepth == 8)
-      mPixelFormat = NTV2_FBF_8BIT_YCBCR;
-    else
-      mPixelFormat = NTV2_FBF_10BIT_YCBCR;
-  }
-
-  //  Quad mode must be channel 1
-  if (mQuad) {
-    mInputChannel = NTV2_CHANNEL1;
-    mOutputChannel = NTV2_CHANNEL5;
-    mEncodeChannel = M31_CH0;
-  } else {
-    //  When input channel specified we are multistream
-    switch (mInputChannel) {
-      case NTV2_CHANNEL1:{
-        mEncodeChannel = M31_CH0;
-        mOutputChannel = NTV2_CHANNEL5;
-        mMultiStream = true;
-        break;
-      }
-      case NTV2_CHANNEL2:{
-        mEncodeChannel = M31_CH1;
-        mOutputChannel = NTV2_CHANNEL6;
-        mMultiStream = true;
-        break;
-      }
-      case NTV2_CHANNEL3:{
-        mEncodeChannel = M31_CH2;
-        mOutputChannel = NTV2_CHANNEL7;
-        mMultiStream = true;
-        break;
-      }
-      case NTV2_CHANNEL4:{
-        mEncodeChannel = M31_CH3;
-        mOutputChannel = NTV2_CHANNEL8;
-        mMultiStream = true;
-        break;
-      }
-      default:{
-        mInputChannel = NTV2_CHANNEL1;
-        mOutputChannel = NTV2_CHANNEL5;
-        mEncodeChannel = M31_CH0;
-      }
-    }
-  }
 
   //    Setup frame buffer
   status = SetupVideo ();
@@ -233,9 +184,6 @@ AJAStatus
     GST_ERROR ("Video setup failure");
     return status;
   }
-  //    Route input signals to frame buffers
-  RouteInputSignal ();
-
 
   //    Setup codec
   if (mHevcOutput) {
@@ -249,11 +197,13 @@ AJAStatus
   return AJA_STATUS_SUCCESS;
 }
 
-AJAStatus NTV2GstAV::InitAudio (uint32_t * numAudioChannels)
+AJAStatus
+NTV2GstAV::InitAudio (const NTV2AudioSource inAudioSource, uint32_t * numAudioChannels)
 {
   AJAStatus
   status (AJA_STATUS_SUCCESS);
 
+  mAudioSource = inAudioSource;
   mNumAudioChannels = *numAudioChannels;
 
   //    Setup audio buffer
@@ -550,120 +500,227 @@ AJAStatus NTV2GstAV::SetupHEVC (void)
 
 AJAStatus NTV2GstAV::SetupVideo (void)
 {
-  //    Setup frame buffer
-  if (mQuad) {
-    if (mInputChannel != NTV2_CHANNEL1)
-      return AJA_STATUS_FAIL;
-
-    //    Disable multiformat
-    if (::NTV2DeviceCanDoMultiFormat (mDeviceID))
-      mDevice.SetMultiFormatMode (false);
-
-    //    Set the board video format
-    mDevice.SetVideoFormat (mVideoFormat, false, false, NTV2_CHANNEL1);
-
-    //    Set frame buffer format
-    mDevice.SetFrameBufferFormat (NTV2_CHANNEL1, mPixelFormat);
-    mDevice.SetFrameBufferFormat (NTV2_CHANNEL2, mPixelFormat);
-    mDevice.SetFrameBufferFormat (NTV2_CHANNEL3, mPixelFormat);
-    mDevice.SetFrameBufferFormat (NTV2_CHANNEL4, mPixelFormat);
-    mDevice.SetFrameBufferFormat (NTV2_CHANNEL5, mPixelFormat);
-    mDevice.SetFrameBufferFormat (NTV2_CHANNEL6, mPixelFormat);
-    mDevice.SetFrameBufferFormat (NTV2_CHANNEL7, mPixelFormat);
-    mDevice.SetFrameBufferFormat (NTV2_CHANNEL8, mPixelFormat);
-
-    //    Set catpure mode
-    mDevice.SetMode (NTV2_CHANNEL1, NTV2_MODE_CAPTURE, false);
-    mDevice.SetMode (NTV2_CHANNEL2, NTV2_MODE_CAPTURE, false);
-    mDevice.SetMode (NTV2_CHANNEL3, NTV2_MODE_CAPTURE, false);
-    mDevice.SetMode (NTV2_CHANNEL4, NTV2_MODE_CAPTURE, false);
-    mDevice.SetMode (NTV2_CHANNEL5, NTV2_MODE_DISPLAY, false);
-    mDevice.SetMode (NTV2_CHANNEL6, NTV2_MODE_DISPLAY, false);
-    mDevice.SetMode (NTV2_CHANNEL7, NTV2_MODE_DISPLAY, false);
-    mDevice.SetMode (NTV2_CHANNEL8, NTV2_MODE_DISPLAY, false);
-
-    //    Enable frame buffers
-    mDevice.EnableChannel (NTV2_CHANNEL1);
-    mDevice.EnableChannel (NTV2_CHANNEL2);
-    mDevice.EnableChannel (NTV2_CHANNEL3);
-    mDevice.EnableChannel (NTV2_CHANNEL4);
-    mDevice.EnableChannel (NTV2_CHANNEL5);
-    mDevice.EnableChannel (NTV2_CHANNEL6);
-    mDevice.EnableChannel (NTV2_CHANNEL7);
-    mDevice.EnableChannel (NTV2_CHANNEL8);
-
-    //    Save input source
-    mInputSource =::NTV2ChannelToInputSource (NTV2_CHANNEL1);
-  } else if (mMultiStream) {
-    //    Configure for multiformat
-    if (::NTV2DeviceCanDoMultiFormat (mDeviceID))
-      mDevice.SetMultiFormatMode (true);
-
-    //    Set the channel video format
-    mDevice.SetVideoFormat (mVideoFormat, false, false, mInputChannel);
-    mDevice.SetVideoFormat (mVideoFormat, false, false, mOutputChannel);
-
-    //    Set frame buffer format
-    mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
-    mDevice.SetFrameBufferFormat (mOutputChannel, mPixelFormat);
-
-    //    Set catpure mode
-    mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
-    mDevice.SetMode (mOutputChannel, NTV2_MODE_DISPLAY, false);
-
-    //    Enable frame buffer
-    mDevice.EnableChannel (mInputChannel);
-    mDevice.EnableChannel (mOutputChannel);
-
-    //    Save input source
-    mInputSource =::NTV2ChannelToInputSource (mInputChannel);
+  // Figure out frame buffer format
+  if (mHevcOutput) {
+    if (mBitDepth == 8) {
+      if (mIs422)
+        mPixelFormat = NTV2_FBF_8BIT_YCBCR_422PL2;
+      else
+        mPixelFormat = NTV2_FBF_8BIT_YCBCR_420PL2;
+    } else {
+      if (mIs422)
+        mPixelFormat = NTV2_FBF_10BIT_YCBCR_422PL2;
+      else
+        mPixelFormat = NTV2_FBF_10BIT_YCBCR_420PL2;
+    }
   } else {
-    //    Disable multiformat mode
-    if (::NTV2DeviceCanDoMultiFormat (mDeviceID))
-      mDevice.SetMultiFormatMode (false);
-
-    //    Set the board format
-    mDevice.SetVideoFormat (mVideoFormat, false, false, NTV2_CHANNEL1);
-    mDevice.SetVideoFormat (mVideoFormat, false, false, NTV2_CHANNEL5);
-
-    //    Set frame buffer format
-    mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
-    mDevice.SetFrameBufferFormat (mOutputChannel, mPixelFormat);
-
-    //    Set display mode
-    mDevice.SetMode (NTV2_CHANNEL1, NTV2_MODE_DISPLAY, false);
-    mDevice.SetMode (NTV2_CHANNEL2, NTV2_MODE_DISPLAY, false);
-    mDevice.SetMode (NTV2_CHANNEL3, NTV2_MODE_DISPLAY, false);
-    mDevice.SetMode (NTV2_CHANNEL4, NTV2_MODE_DISPLAY, false);
-    mDevice.SetMode (NTV2_CHANNEL5, NTV2_MODE_DISPLAY, false);
-    mDevice.SetMode (NTV2_CHANNEL6, NTV2_MODE_DISPLAY, false);
-    mDevice.SetMode (NTV2_CHANNEL7, NTV2_MODE_DISPLAY, false);
-    mDevice.SetMode (NTV2_CHANNEL8, NTV2_MODE_DISPLAY, false);
-
-    //    Set catpure mode
-    mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
-
-    //    Enable frame buffer
-    mDevice.EnableChannel (mInputChannel);
-    mDevice.EnableChannel (mOutputChannel);
-
-    //    Save input source
-    mInputSource =::NTV2ChannelToInputSource (mInputChannel);
+    if (mBitDepth == 8)
+      mPixelFormat = NTV2_FBF_8BIT_YCBCR;
+    else
+      mPixelFormat = NTV2_FBF_10BIT_YCBCR;
   }
 
-  //    Set the device reference to the input...
-  if (mMultiStream) {
-    mDevice.SetReference (NTV2_REFERENCE_FREERUN);
-  } else {
-    mDevice.SetReference (::NTV2InputSourceToReferenceSource (mInputSource));
-  }
-
-  //    Enable and subscribe to the interrupts for the channel to be used...
+  // Enable and subscribe to the interrupts for the channel to be used...
+  mDevice.EnableOutputInterrupt ();
   mDevice.EnableInputInterrupt (mInputChannel);
   mDevice.SubscribeInputVerticalEvent (mInputChannel);
 
+  // Enable input channel
+  mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
+  mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
+
+  mDevice.EnableChannel (mInputChannel);
+
+  //    Setup frame buffer
+  if (mQuad) {
+    //    Set capture mode
+    mDevice.SetMode (NTV2_CHANNEL2, NTV2_MODE_CAPTURE, false);
+    mDevice.SetMode (NTV2_CHANNEL3, NTV2_MODE_CAPTURE, false);
+    mDevice.SetMode (NTV2_CHANNEL4, NTV2_MODE_CAPTURE, false);
+
+    //    Set frame buffer format
+    mDevice.SetFrameBufferFormat (NTV2_CHANNEL2, mPixelFormat);
+    mDevice.SetFrameBufferFormat (NTV2_CHANNEL3, mPixelFormat);
+    mDevice.SetFrameBufferFormat (NTV2_CHANNEL4, mPixelFormat);
+
+    //    Enable frame buffers
+    mDevice.EnableChannel (NTV2_CHANNEL2);
+    mDevice.EnableChannel (NTV2_CHANNEL3);
+    mDevice.EnableChannel (NTV2_CHANNEL4);
+
+    if (::NTV2DeviceHasBiDirectionalSDI (mDeviceID)) {
+      mDevice.SetSDITransmitEnable (NTV2_CHANNEL1, false);
+      mDevice.SetSDITransmitEnable (NTV2_CHANNEL2, false);
+      mDevice.SetSDITransmitEnable (NTV2_CHANNEL3, false);
+      mDevice.SetSDITransmitEnable (NTV2_CHANNEL4, false);
+      mDevice.WaitForOutputVerticalInterrupt ();
+      mDevice.WaitForOutputVerticalInterrupt ();
+      mDevice.WaitForOutputVerticalInterrupt ();
+    }
+  }
+
+  mDevice.SetVideoFormat(mVideoFormat, true, false, mInputChannel);
+
   mTimeBase.SetAJAFrameRate (GetAJAFrameRate (GetNTV2FrameRateFromVideoFormat
           (mVideoFormat)));
+
+  // Set up routing
+
+  // Select input channel based on mode
+  NTV2CrosspointID inputIdentifier = NTV2_XptSDIIn1;
+  switch (mVideoSource) {
+    case NTV2_INPUTSOURCE_SDI1:
+      // Select correct values based on channel
+      switch (mInputChannel) {
+         default:
+         case NTV2_CHANNEL1:
+            inputIdentifier = NTV2_XptSDIIn1;
+            mInputSource    = NTV2_INPUTSOURCE_SDI1;
+            break;
+         case NTV2_CHANNEL2:
+            inputIdentifier = NTV2_XptSDIIn2;
+            mInputSource    = NTV2_INPUTSOURCE_SDI2;
+            break;
+         case NTV2_CHANNEL3:
+            inputIdentifier = NTV2_XptSDIIn3;
+            mInputSource    = NTV2_INPUTSOURCE_SDI3;
+            break;
+         case NTV2_CHANNEL4:
+            inputIdentifier = NTV2_XptSDIIn4;
+            mInputSource    = NTV2_INPUTSOURCE_SDI4;
+            break;
+         case NTV2_CHANNEL5:
+            inputIdentifier = NTV2_XptSDIIn5;
+            mInputSource    = NTV2_INPUTSOURCE_SDI5;
+            break;
+         case NTV2_CHANNEL6:
+            inputIdentifier = NTV2_XptSDIIn6;
+            mInputSource    = NTV2_INPUTSOURCE_SDI6;
+            break;
+         case NTV2_CHANNEL7:
+            inputIdentifier = NTV2_XptSDIIn7;
+            mInputSource    = NTV2_INPUTSOURCE_SDI7;
+            break;
+         case NTV2_CHANNEL8:
+            inputIdentifier = NTV2_XptSDIIn8;
+            mInputSource    = NTV2_INPUTSOURCE_SDI8;
+            break;
+      }
+
+      if(!::NTV2BoardCanDoInputSource (mDeviceID, mInputSource))
+        mInputSource = NTV2_INPUTSOURCE_SDI1;
+
+      break;
+    case NTV2_INPUTSOURCE_HDMI1:
+      inputIdentifier = NTV2_XptHDMIIn;
+      mInputSource = NTV2_INPUTSOURCE_HDMI;
+      break;
+    case NTV2_INPUTSOURCE_ANALOG1:
+      inputIdentifier = NTV2_XptAnalogIn;
+      mInputSource = NTV2_INPUTSOURCE_ANALOG;
+      break;
+    default:
+      g_assert_not_reached ();
+      break;
+  }
+
+  NTV2InputCrosspointID fbfInputSelect;
+  CNTV2SignalRouter router;
+
+  // Get corresponding input select entries for the channel
+  switch (mInputChannel) {
+    default:
+    case NTV2_CHANNEL1:
+      mEncodeChannel = M31_CH0;
+      fbfInputSelect = NTV2_XptFrameBuffer1Input;
+      break;
+    case NTV2_CHANNEL2:
+      mEncodeChannel = M31_CH1;
+      fbfInputSelect = NTV2_XptFrameBuffer2Input;
+      break;
+    case NTV2_CHANNEL3:
+      mEncodeChannel = M31_CH2;
+      fbfInputSelect = NTV2_XptFrameBuffer3Input;
+      break;
+    case NTV2_CHANNEL4:
+      mEncodeChannel = M31_CH3;
+      fbfInputSelect = NTV2_XptFrameBuffer4Input;
+      break;
+    case NTV2_CHANNEL5:
+      mEncodeChannel = M31_CH3; //FIXME
+      fbfInputSelect = NTV2_XptFrameBuffer5Input;
+      break;
+    case NTV2_CHANNEL6:
+      mEncodeChannel = M31_CH3; //FIXME
+      fbfInputSelect = NTV2_XptFrameBuffer6Input;
+      break;
+    case NTV2_CHANNEL7:
+      mEncodeChannel = M31_CH3; //FIXME
+      fbfInputSelect = NTV2_XptFrameBuffer7Input;
+      break;
+    case NTV2_CHANNEL8:
+      mEncodeChannel = M31_CH3; //FIXME
+      fbfInputSelect = NTV2_XptFrameBuffer8Input;
+      break;
+  }
+
+  // Add to the mapping to the router for this channel
+  router.AddConnection (fbfInputSelect, inputIdentifier);
+
+  // Disable SDI output from the SDI input being used,
+  // but only if the device supports bi-directional SDI,
+  // and only if the input being used is an SDI input
+  if (::NTV2BoardHasBiDirectionalSDI (mDeviceID)) {
+    mDevice.SetSDITransmitEnable(mInputChannel, false);
+  } else {
+    if (mInputSource == NTV2_INPUTSOURCE_HDMI) {
+      // Enable HDMI passthrough
+      router.AddConnection(NTV2_XptHDMIOutInput, NTV2_XptHDMIIn);
+    } else {
+      // enable SDI End to End mode for all AJA cards that don't support bidirectional SDI
+
+      if (mInputChannel == NTV2_CHANNEL1) {
+        router.AddConnection (NTV2_XptSDIOut1Input, NTV2_XptSDIIn1);
+      } else if (mInputChannel == NTV2_CHANNEL2) {
+        router.AddConnection (NTV2_XptSDIOut2Input, NTV2_XptSDIIn2);
+      } else if (mInputChannel == NTV2_CHANNEL3) {
+        router.AddConnection (NTV2_XptSDIOut3Input, NTV2_XptSDIIn3);
+      } else if (mInputChannel == NTV2_CHANNEL4) {
+        router.AddConnection (NTV2_XptSDIOut4Input, NTV2_XptSDIIn4);
+      }
+    }
+  }
+
+  // Enable UHD/4k quad mode
+  if (mQuad) {
+    router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
+    router.AddConnection(NTV2_XptFrameBuffer3Input, NTV2_XptSDIIn3);
+    router.AddConnection(NTV2_XptFrameBuffer4Input, NTV2_XptSDIIn4);
+    mInputChannel = NTV2_CHANNEL1;
+    mOutputChannel = NTV2_CHANNEL5;
+    mEncodeChannel = M31_CH0;
+  }
+
+  // Enable passthrough on bidirectional devices
+  if (mPassthrough && ::NTV2DeviceHasBiDirectionalSDI(mDeviceID)) {
+    int numVideoInputs = NTV2DeviceGetNumVideoOutputs (mDeviceID);
+
+    mDevice.SetMode((NTV2Channel)(mInputChannel + numVideoInputs / 2), NTV2_MODE_DISPLAY);
+    // Enable End to End mode for all AJA cards that don't support bidirectional SDI
+    if (mInputChannel == NTV2_CHANNEL1) {
+      router.AddConnection ((numVideoInputs == 8) ? NTV2_XptSDIOut5Input : NTV2_XptSDIOut3Input, NTV2_XptSDIIn1);
+      mDevice.SetSDITransmitEnable ((numVideoInputs == 8) ? NTV2_CHANNEL5 : NTV2_CHANNEL3, true);
+    } else if (mInputChannel == NTV2_CHANNEL2) {
+      router.AddConnection ((numVideoInputs == 8) ? NTV2_XptSDIOut6Input : NTV2_XptSDIOut4Input, NTV2_XptSDIIn2);
+      mDevice.SetSDITransmitEnable ((numVideoInputs == 8) ? NTV2_CHANNEL6 : NTV2_CHANNEL4 , true);
+    } else if (mInputChannel == NTV2_CHANNEL3) {
+      router.AddConnection ((numVideoInputs == 8) ? NTV2_XptSDIOut7Input : NTV2_XptSDIOut5Input, NTV2_XptSDIIn3);
+      mDevice.SetSDITransmitEnable ((numVideoInputs == 8) ? NTV2_CHANNEL7 : NTV2_CHANNEL5 , true);
+    } else if (mInputChannel == NTV2_CHANNEL4) {
+      router.AddConnection ((numVideoInputs == 8) ? NTV2_XptSDIOut8Input : NTV2_XptSDIOut6Input, NTV2_XptSDIIn4);
+      mDevice.SetSDITransmitEnable ((numVideoInputs == 8) ? NTV2_CHANNEL8 : NTV2_CHANNEL6 , true);
+    }
+  }
 
   // VANC handling
   if (mCaptureTall) {
@@ -677,22 +734,138 @@ AJAStatus NTV2GstAV::SetupVideo (void)
     }
   }
 
-  return AJA_STATUS_SUCCESS;
+  // Enable routes
+  mDevice.ApplySignalRoute (router, false);
 
-}                               //    SetupVideo
+  //    Set the device reference to the input...
+  //    FIXME
+//  if (mMultiStream) {
+//    mDevice.SetReference (NTV2_REFERENCE_FREERUN);
+//  } else {
+    mDevice.SetReference (::NTV2InputSourceToReferenceSource (mInputSource));
+//  }
+
+#if 0
+  //    When input is 3Gb convert to 3Ga for capture (no RGB support?)
+  bool is3Gb = false;
+  mDevice.GetSDIInput3GbPresent (is3Gb, mInputChannel);
+
+  if (mQuad) {
+    mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL1, is3Gb);
+    mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL2, is3Gb);
+    mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL3, is3Gb);
+    mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL4, is3Gb);
+    mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL5, false);
+    mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL6, false);
+    mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL7, false);
+    mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL8, false);
+  } else {
+    mDevice.SetSDIInLevelBtoLevelAConversion (mInputChannel, is3Gb);
+    mDevice.SetSDIOutLevelAtoLevelBConversion (mOutputChannel, false);
+  }
+
+  if (!mMultiStream)            //    If not doing multistream...
+    mDevice.ClearRouting ();    //    ...replace existing routing
+
+  //    Connect SDI output spigots to FB outputs...
+  mDevice.Connect (NTV2_XptSDIOut5Input, NTV2_XptFrameBuffer5YUV);
+  mDevice.Connect (NTV2_XptSDIOut6Input, NTV2_XptFrameBuffer6YUV);
+  mDevice.Connect (NTV2_XptSDIOut7Input, NTV2_XptFrameBuffer7YUV);
+  mDevice.Connect (NTV2_XptSDIOut8Input, NTV2_XptFrameBuffer8YUV);
+#endif
+
+  //    Give the device some time to lock to the input signal...
+  mDevice.WaitForOutputVerticalInterrupt (mInputChannel, 8);
+
+
+  return AJA_STATUS_SUCCESS;
+}                               //    SetupAudio
 
 
 AJAStatus NTV2GstAV::SetupAudio (void)
 {
-  ULWord
-      numAudio =::NTV2DeviceGetNumAudioSystems (mDeviceID);
-  //    In multiformat mode, base the audio system on the channel...
-  if (mMultiStream && numAudio > 1 && UWord (mInputChannel) < numAudio)
-    mAudioSystem =::NTV2ChannelToAudioSystem (mInputChannel);
+  // Select audio system to use based on the channel
+  switch (mInputChannel) {
+    default:
+    case NTV2_CHANNEL1:
+      mAudioSystem = NTV2_AUDIOSYSTEM_1;
+      break;
+    case NTV2_CHANNEL2:
+      mAudioSystem = NTV2_AUDIOSYSTEM_2;
+      break;
+    case NTV2_CHANNEL3:
+      mAudioSystem = NTV2_AUDIOSYSTEM_3;
+      break;
+    case NTV2_CHANNEL4:
+      mAudioSystem = NTV2_AUDIOSYSTEM_4;
+      break;
+    case NTV2_CHANNEL5:
+      mAudioSystem = NTV2_AUDIOSYSTEM_5;
+      break;
+    case NTV2_CHANNEL6:
+      mAudioSystem = NTV2_AUDIOSYSTEM_6;
+      break;
+    case NTV2_CHANNEL7:
+      mAudioSystem = NTV2_AUDIOSYSTEM_7;
+      break;
+    case NTV2_CHANNEL8:
+      mAudioSystem = NTV2_AUDIOSYSTEM_8;
+      break;
+  }
 
-  //    Have the audio system capture audio from the designated device input (i.e., ch1 uses SDIIn1, ch2 uses SDIIn2, etc.)...
-  mDevice.SetAudioSystemInputSource (mAudioSystem,
-      NTV2_AUDIO_EMBEDDED,::NTV2ChannelToEmbeddedAudioInput (mInputChannel));
+  // Then based on channel and/or mode, select the audio input
+  switch (mAudioSource) {
+    case NTV2_AUDIO_EMBEDDED:
+      switch (mInputChannel) {
+        default:
+        case NTV2_CHANNEL1:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1, mAudioSystem);
+          break;
+        case NTV2_CHANNEL2:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_2);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_2, mAudioSystem);
+          break;
+        case NTV2_CHANNEL3:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_3);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_3, mAudioSystem);
+          break;
+        case NTV2_CHANNEL4:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_4);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_4, mAudioSystem);
+          break;
+        case NTV2_CHANNEL5:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_5);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_5, mAudioSystem);
+          break;
+        case NTV2_CHANNEL6:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_6);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_6, mAudioSystem);
+          break;
+        case NTV2_CHANNEL7:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_7);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_7, mAudioSystem);
+          break;
+        case NTV2_CHANNEL8:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_8);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_8, mAudioSystem);
+          break;
+      }
+
+      break;
+    case NTV2_AUDIO_HDMI:
+      mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_HDMI, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1);
+      break;
+    case NTV2_AUDIO_AES:
+      mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_AES, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1);
+      break;
+    case NTV2_AUDIO_ANALOG:
+      mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_ANALOG, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1);
+      break;
+    default:
+      g_assert_not_reached ();
+      break;
+  }
 
   if (mNumAudioChannels == 0)
     mNumAudioChannels =::NTV2DeviceGetMaxAudioChannels (mDeviceID);
@@ -708,6 +881,8 @@ AJAStatus NTV2GstAV::SetupAudio (void)
 
   //    The on-device audio buffer should be 4MB to work best across all devices & platforms...
   mDevice.SetAudioBufferSize (NTV2_AUDIO_BUFFER_BIG, mAudioSystem);
+
+  mDevice.SetAudioLoopBack(NTV2_AUDIO_LOOPBACK_OFF, mAudioSystem);
 
   return AJA_STATUS_SUCCESS;
 
@@ -791,61 +966,6 @@ NTV2GstAV::FreeHostBuffers (void)
     mAudioBufferPool = NULL;
   }
 }
-
-
-void
-NTV2GstAV::RouteInputSignal (void)
-{
-  // setup sdi io
-  mDevice.SetSDITransmitEnable (NTV2_CHANNEL1, false);
-  mDevice.SetSDITransmitEnable (NTV2_CHANNEL2, false);
-  mDevice.SetSDITransmitEnable (NTV2_CHANNEL3, false);
-  mDevice.SetSDITransmitEnable (NTV2_CHANNEL4, false);
-  mDevice.SetSDITransmitEnable (NTV2_CHANNEL5, true);
-  mDevice.SetSDITransmitEnable (NTV2_CHANNEL6, true);
-  mDevice.SetSDITransmitEnable (NTV2_CHANNEL7, true);
-  mDevice.SetSDITransmitEnable (NTV2_CHANNEL8, true);
-
-  //    Give the device some time to lock to the input signal...
-  mDevice.WaitForOutputVerticalInterrupt (mInputChannel, 8);
-
-  //    When input is 3Gb convert to 3Ga for capture (no RGB support?)
-  bool is3Gb = false;
-  mDevice.GetSDIInput3GbPresent (is3Gb, mInputChannel);
-
-  if (mQuad) {
-    mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL1, is3Gb);
-    mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL2, is3Gb);
-    mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL3, is3Gb);
-    mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL4, is3Gb);
-    mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL5, false);
-    mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL6, false);
-    mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL7, false);
-    mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL8, false);
-  } else {
-    mDevice.SetSDIInLevelBtoLevelAConversion (mInputChannel, is3Gb);
-    mDevice.SetSDIOutLevelAtoLevelBConversion (mOutputChannel, false);
-  }
-
-  if (!mMultiStream)            //    If not doing multistream...
-    mDevice.ClearRouting ();    //    ...replace existing routing
-
-  //    Connect FB inputs to SDI input spigots...
-  mDevice.Connect (NTV2_XptFrameBuffer1Input, NTV2_XptSDIIn1);
-  mDevice.Connect (NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
-  mDevice.Connect (NTV2_XptFrameBuffer3Input, NTV2_XptSDIIn3);
-  mDevice.Connect (NTV2_XptFrameBuffer4Input, NTV2_XptSDIIn4);
-
-  //    Connect SDI output spigots to FB outputs...
-  mDevice.Connect (NTV2_XptSDIOut5Input, NTV2_XptFrameBuffer5YUV);
-  mDevice.Connect (NTV2_XptSDIOut6Input, NTV2_XptFrameBuffer6YUV);
-  mDevice.Connect (NTV2_XptSDIOut7Input, NTV2_XptFrameBuffer7YUV);
-  mDevice.Connect (NTV2_XptSDIOut8Input, NTV2_XptFrameBuffer8YUV);
-
-  //    Give the device some time to lock to the input signal...
-  mDevice.WaitForOutputVerticalInterrupt (mInputChannel, 8);
-}
-
 
 void
 NTV2GstAV::SetupAutoCirculate (void)

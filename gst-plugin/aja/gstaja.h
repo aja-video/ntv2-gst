@@ -141,6 +141,25 @@ typedef enum
 #define GST_TYPE_AJA_MODE_HEVC (gst_aja_mode_get_type_hevc ())
 GType gst_aja_mode_get_type_hevc (void);
 
+typedef enum {
+  GST_AJA_VIDEO_INPUT_MODE_SDI,
+  GST_AJA_VIDEO_INPUT_MODE_HDMI,
+  GST_AJA_VIDEO_INPUT_MODE_ANALOG,
+} GstAjaVideoInputMode;
+
+#define GST_TYPE_AJA_VIDEO_INPUT_MODE (gst_aja_video_input_mode_get_type ())
+GType gst_aja_video_input_mode_get_type (void);
+
+typedef enum {
+  GST_AJA_AUDIO_INPUT_MODE_EMBEDDED,
+  GST_AJA_AUDIO_INPUT_MODE_HDMI,
+  GST_AJA_AUDIO_INPUT_MODE_AES,
+  GST_AJA_AUDIO_INPUT_MODE_ANALOG,
+} GstAjaAudioInputMode;
+
+#define GST_TYPE_AJA_AUDIO_INPUT_MODE (gst_aja_audio_input_mode_get_type ())
+GType gst_aja_audio_input_mode_get_type (void);
+
 // Used to keep track of engine when shared between audio/hevc/and video
 typedef enum
 {
