@@ -151,6 +151,17 @@ typedef enum {
 GType gst_aja_video_input_mode_get_type (void);
 
 typedef enum {
+  GST_AJA_TIMECODE_MODE_VITC1,
+  GST_AJA_TIMECODE_MODE_VITC2,
+  GST_AJA_TIMECODE_MODE_ANALOG_LTC1,
+  GST_AJA_TIMECODE_MODE_ANALOG_LTC2,
+  GST_AJA_TIMECODE_MODE_ATC_LTC,
+} GstAjaTimecodeMode;
+
+#define GST_TYPE_AJA_TIMECODE_MODE (gst_aja_timecode_mode_get_type ())
+GType gst_aja_timecode_mode_get_type (void);
+
+typedef enum {
   GST_AJA_AUDIO_INPUT_MODE_EMBEDDED,
   GST_AJA_AUDIO_INPUT_MODE_HDMI,
   GST_AJA_AUDIO_INPUT_MODE_AES,

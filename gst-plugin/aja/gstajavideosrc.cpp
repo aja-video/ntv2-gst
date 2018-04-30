@@ -38,6 +38,7 @@ GST_DEBUG_CATEGORY_STATIC (gst_aja_video_src_debug);
 #define DEFAULT_QUEUE_SIZE         (5)
 #define DEFAULT_OUTPUT_STREAM_TIME (FALSE)
 #define DEFAULT_SKIP_FIRST_TIME    (0)
+#define DEFAULT_TIMECODE_MODE	   (GST_AJA_TIMECODE_MODE_VITC1)
 #define DEFAULT_OUTPUT_CC	   (FALSE)
 
 enum
@@ -51,6 +52,7 @@ enum
   PROP_QUEUE_SIZE,
   PROP_OUTPUT_STREAM_TIME,
   PROP_SKIP_FIRST_TIME,
+  PROP_TIMECODE_MODE,
   PROP_OUTPUT_CC
 };
 
@@ -186,6 +188,13 @@ gst_aja_video_src_class_init (GstAjaVideoSrcClass * klass)
           G_MAXUINT64, DEFAULT_SKIP_FIRST_TIME,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
+  g_object_class_install_property (gobject_class, PROP_TIMECODE_MODE,
+      g_param_spec_enum ("timecode-mode", "Timecode Mode",
+          "Timecode Mode to use for extraction",
+          GST_TYPE_AJA_TIMECODE_MODE, DEFAULT_TIMECODE_MODE,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+              G_PARAM_CONSTRUCT)));
+
   g_object_class_install_property (gobject_class, PROP_OUTPUT_CC,
       g_param_spec_boolean ("output-cc", "Output Closed Caption",
           "Extract and output CC as GstMeta (if present)",
@@ -217,6 +226,7 @@ gst_aja_video_src_init (GstAjaVideoSrc * src)
   src->queue_size = DEFAULT_QUEUE_SIZE;
   src->output_stream_time = DEFAULT_OUTPUT_STREAM_TIME;
   src->skip_first_time = DEFAULT_SKIP_FIRST_TIME;
+  src->timecode_mode = DEFAULT_TIMECODE_MODE;
 
   src->window_size = 64;
   src->times = g_new (GstClockTime, 4 * src->window_size);
@@ -275,6 +285,10 @@ gst_aja_video_src_set_property (GObject * object, guint property_id,
       src->skip_first_time = g_value_get_uint64 (value);
       break;
 
+    case PROP_TIMECODE_MODE:
+      src->timecode_mode = (GstAjaTimecodeMode) g_value_get_enum (value);
+      break;
+
     case PROP_OUTPUT_CC:
       src->output_cc = g_value_get_boolean (value);
       break;
@@ -322,6 +336,10 @@ gst_aja_video_src_get_property (GObject * object, guint property_id,
 
     case PROP_SKIP_FIRST_TIME:
       g_value_set_uint64 (value, src->skip_first_time);
+      break;
+
+    case PROP_TIMECODE_MODE:
+      g_value_set_enum (value, src->timecode_mode);
       break;
 
     case PROP_OUTPUT_CC:
@@ -497,6 +515,7 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
   AJAStatus status;
   const GstAjaMode *mode;
   NTV2InputSource input_source;
+  NTV2TCIndex timecode_mode;
 
   GST_DEBUG_OBJECT (src, "open");
 
@@ -540,6 +559,32 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
       break;
   }
 
+  switch (src->timecode_mode) {
+    case GST_AJA_TIMECODE_MODE_VITC1:
+      timecode_mode = NTV2_TCINDEX_SDI1;
+      break;
+
+    case GST_AJA_TIMECODE_MODE_VITC2:
+      timecode_mode = NTV2_TCINDEX_SDI1_2;
+      break;
+
+    case GST_AJA_TIMECODE_MODE_ANALOG_LTC1:
+      timecode_mode = NTV2_TCINDEX_LTC1;
+      break;
+
+    case GST_AJA_TIMECODE_MODE_ANALOG_LTC2:
+      timecode_mode = NTV2_TCINDEX_LTC2;
+      break;
+
+    case GST_AJA_TIMECODE_MODE_ATC_LTC:
+      timecode_mode = NTV2_TCINDEX_SDI1_LTC;
+      break;
+
+    default:
+      g_assert_not_reached ();
+      break;
+  }
+
   status = src->input->ntv2AVHevc->Init (src->input->mode->videoPreset,
       src->input->mode->videoFormat,
       input_source,
@@ -547,7 +592,7 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
       src->input->mode->is422,
       false,
       false,
-      src->input->mode->isQuad, false, false, src->output_cc ? true : false,
+      src->input->mode->isQuad, timecode_mode, false, src->output_cc ? true : false,
       src->passthrough ? true : false);
   if (!AJA_SUCCESS (status)) {
     GST_ERROR_OBJECT (src, "Failed to initialize input");
@@ -1104,7 +1149,10 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     gst_video_time_code_init (&tc, src->input->mode->fps_n,
         src->input->mode->fps_d, NULL, flags, hours, minutes, seconds, frames,
         field_count);
-    gst_buffer_add_video_time_code_meta (*buffer, &tc);
+    if (gst_video_time_code_is_valid (&tc)) {
+      GST_DEBUG_OBJECT (src, "Adding timecode %02u:%02u:%02u.%02u", hours, minutes, seconds, frames);
+      gst_buffer_add_video_time_code_meta (*buffer, &tc);
+    }
     gst_video_time_code_clear (&tc);
   }
 #if GST_CHECK_VERSION (1, 13, 0)

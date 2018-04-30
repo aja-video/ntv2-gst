@@ -419,6 +419,29 @@ gst_aja_video_input_mode_get_type (void)
 }
 
 GType
+gst_aja_timecode_mode_get_type (void)
+{
+    static gsize id = 0;
+    static const GEnumValue modes[] =
+    {
+        {GST_AJA_TIMECODE_MODE_VITC1,      "vitc1",              "RP188 VITC1"},
+        {GST_AJA_TIMECODE_MODE_VITC2,      "vitc2",              "RP188 VITC2"},
+        {GST_AJA_TIMECODE_MODE_ANALOG_LTC1,"analog-ltc1",        "Analog LTC1"},
+        {GST_AJA_TIMECODE_MODE_ANALOG_LTC2,"analog-ltc2",        "Analog LTC2"},
+        {GST_AJA_TIMECODE_MODE_ATC_LTC,    "atc-ltc",            "ATC LTC"},
+        {0,                                 NULL,                 NULL}
+    };
+    
+    if (g_once_init_enter (&id))
+    {
+        GType tmp = g_enum_register_static ("GstAjaTimecodeMode", modes);
+        g_once_init_leave (&id, tmp);
+    }
+    
+    return (GType) id;
+}
+
+GType
 gst_aja_audio_input_mode_get_type (void)
 {
     static gsize id = 0;

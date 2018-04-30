@@ -61,6 +61,7 @@ struct _GstAjaVideoSrc
     gboolean                    passthrough;
     gboolean                    output_stream_time;
     GstClockTime                skip_first_time;
+    GstAjaTimecodeMode          timecode_mode;
     gboolean                    output_cc;
     gint			last_cc_vbi_line;
 

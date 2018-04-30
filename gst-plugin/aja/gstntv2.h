@@ -131,7 +131,7 @@ class NTV2GstAV
                                 const bool                      inIsAuto        = false,
                                 const bool                      inHevcOutput    = false,
                                 const bool                      inQuadMode      = false,
-                                const bool                      inTimeCode      = false,
+                                const NTV2TCIndex               inTimeCode      = NTV2_TCINDEX_SDI1,
                                 const bool                      inInfoData      = false,
 				const bool                      inCaptureTall   = false,
                                 const bool                      inPassthrough   = false);
@@ -312,7 +312,7 @@ class NTV2GstAV
         bool                        mQuad;                    /// VideoFormat is quad
         bool                        mMultiStream;            /// Demonstrates how to configure the board for multi-stream
         bool                        mWithInfo;              /// Demonstrates how to configure picture information mode
-        bool                        mWithAnc;               /// Add timecode burn
+        NTV2TCIndex                 mTimecodeMode;        /// Add timecode burn
 	bool                        mCaptureTall;	    /// Capture Tall Video
         NTV2InputSource             mVideoSource;
         bool                        mPassthrough;
