@@ -1311,7 +1311,13 @@ NTV2GstAV::ACInputWorker (void)
       // Either AutoCirculate is not running, or there were no frames available on the device to transfer.
       // Rather than waste CPU cycles spinning, waiting until a frame becomes available, it's far more
       // efficient to wait for the next input vertical interrupt event to get signaled...
-      mDevice.WaitForInputVerticalInterrupt (mInputChannel);
+      if (mLastFrame) {
+          mLastFrameVideoOut = true;
+          mLastFrameAudioOut = true;
+          break;
+      } else {
+        mDevice.WaitForInputVerticalInterrupt (mInputChannel);
+      }
     }
   }                             // loop til quit signaled
 
