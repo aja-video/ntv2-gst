@@ -178,6 +178,26 @@ AJAStatus
     mHevcOutput = false;
   }
 
+  // Ensure that mCaptureTall is only set for formats that can
+  // actually contain VANC and that we handle
+  switch (mVideoFormat) {
+    case NTV2_FORMAT_720p_5000:
+    case NTV2_FORMAT_720p_5994:
+    case NTV2_FORMAT_720p_6000:
+    case NTV2_FORMAT_1080i_5000:
+    case NTV2_FORMAT_1080i_5994:
+    case NTV2_FORMAT_1080i_6000:
+    case NTV2_FORMAT_1080p_2500:
+    case NTV2_FORMAT_1080p_3000:
+    case NTV2_FORMAT_1080p_5000_A:
+    case NTV2_FORMAT_1080p_5994_A:
+    case NTV2_FORMAT_1080p_6000_A:
+      break;
+    default:
+      mCaptureTall = false;
+      break;
+    }
+
   //    Setup frame buffer
   status = SetupVideo ();
   if (AJA_FAILURE (status)) {
@@ -1190,8 +1210,10 @@ NTV2GstAV::ACInputWorker (void)
       // get the video data size
       pVideoData->videoDataSize = pVideoData->videoBufferSize;
       if (pVideoData->buffer) {
+        bool validVanc = false;
         NTV2FrameGeometry currentGeometry;
         gsize offset = 0;       // Offset in number of lines
+
         mDevice.GetFrameGeometry (&currentGeometry);
         switch (currentGeometry) {
           case NTV2_FG_1920x1112:
@@ -1201,6 +1223,7 @@ NTV2GstAV::ACInputWorker (void)
               offset = 30 * 1920 * 2;
             else
               offset = 30 * 1920 * 16 / 6;
+            validVanc = true;
             break;
           case NTV2_FG_1280x740:
             // 19 line offset (or 20 ?)
@@ -1209,6 +1232,7 @@ NTV2GstAV::ACInputWorker (void)
               offset = 19 * 1280 * 2;
             else
               offset = 19 * 1296 * 16 / 6;
+            validVanc = true;
             break;
           default:
             if (mCaptureTall)
@@ -1220,7 +1244,7 @@ NTV2GstAV::ACInputWorker (void)
         gst_buffer_unmap (pVideoData->buffer, &video_map);
         gst_buffer_resize (pVideoData->buffer, offset,
             pVideoData->videoDataSize - offset);
-        pVideoData->pAncillaryData = pVideoData->pVideoBuffer;
+        pVideoData->pAncillaryData = validVanc ? pVideoData->pVideoBuffer : NULL;
         pVideoData->pVideoBuffer = NULL;
       }
       pVideoData->lastFrame = mLastFrame;
