@@ -65,6 +65,10 @@ struct _GstAjaVideoSrc
     gboolean                    output_cc;
     gint			last_cc_vbi_line;
 
+    gboolean have_signal;
+    GstClockTime discont_time;
+    guint64 discont_frame_number;
+
     GstClockTime first_time;
     GstClockTime *times;
     GstClockTime *times_temp;

@@ -661,9 +661,12 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
   GstAjaVideoSrc *videosrc = NULL;
   GstClockTime stream_time, timestamp;
 
-  stream_time =
-      gst_util_uint64_scale (audioBuff->frameNumber,
-      src->input->mode->fps_d * GST_SECOND, src->input->mode->fps_n);
+  // Just return if we have no signal
+  if (!audioBuff || (!audioBuff->haveSignal && src->have_signal)) {
+    if (audioBuff)
+      src->input->ntv2AVHevc->ReleaseAudioBuffer (audioBuff);
+    return;
+  }
 
   //GST_ERROR_OBJECT (src, "Got audio packet at %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_time));
 
@@ -675,8 +678,12 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
   if (videosrc) {
     g_mutex_lock (&videosrc->lock);
 
-    if (videosrc->first_time == GST_CLOCK_TIME_NONE)
-      videosrc->first_time = stream_time;
+    // The videosrc is always first passed the frame
+    g_assert (videosrc->first_time != GST_CLOCK_TIME_NONE);
+
+    stream_time = videosrc->discont_time +
+        gst_util_uint64_scale (audioBuff->frameNumber - videosrc->discont_frame_number,
+        src->input->mode->fps_d * GST_SECOND, src->input->mode->fps_n);
 
     if (videosrc->skip_first_time > 0
         && stream_time - videosrc->first_time < videosrc->skip_first_time) {
@@ -701,6 +708,7 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
     //GST_LOG_OBJECT (src, "Actual timestamp %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_time));
   } else {
     timestamp = GST_CLOCK_TIME_NONE;
+    stream_time = GST_CLOCK_TIME_NONE;
   }
 
   g_mutex_lock (&src->lock);

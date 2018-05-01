@@ -53,7 +53,8 @@ enum
   PROP_OUTPUT_STREAM_TIME,
   PROP_SKIP_FIRST_TIME,
   PROP_TIMECODE_MODE,
-  PROP_OUTPUT_CC
+  PROP_OUTPUT_CC,
+  PROP_SIGNAL
 };
 
 typedef struct
@@ -201,6 +202,11 @@ gst_aja_video_src_class_init (GstAjaVideoSrcClass * klass)
           DEFAULT_OUTPUT_CC,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
 
+  g_object_class_install_property (gobject_class, PROP_SIGNAL,
+      g_param_spec_boolean ("signal", "Input signal available",
+          "True if there is a valid input signal available",
+          FALSE, (GParamFlags) (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
+
   templ_caps = gst_aja_mode_get_template_caps_raw ();
   gst_element_class_add_pad_template (element_class,
       gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS, templ_caps));
@@ -292,6 +298,7 @@ gst_aja_video_src_set_property (GObject * object, guint property_id,
     case PROP_OUTPUT_CC:
       src->output_cc = g_value_get_boolean (value);
       break;
+
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -345,6 +352,11 @@ gst_aja_video_src_get_property (GObject * object, guint property_id,
     case PROP_OUTPUT_CC:
       g_value_set_boolean (value, src->output_cc);
       break;
+
+    case PROP_SIGNAL:
+      g_value_set_boolean (value, src->have_signal);
+      break;
+
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -667,6 +679,9 @@ gst_aja_video_src_start_streams (GstElement * element)
     GST_DEBUG_OBJECT (src, "Starting streams");
 
     g_mutex_lock (&src->lock);
+    src->have_signal = TRUE;
+    src->discont_time = GST_CLOCK_TIME_NONE;
+    src->discont_frame_number = 0;
     src->first_time = GST_CLOCK_TIME_NONE;
     src->window_fill = 0;
     src->window_filled = FALSE;
@@ -880,16 +895,18 @@ static void
 gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
 {
   GstClock *clock;
-  GstClockTime capture_sys = videoBuff->timeStamp / 10;
+  GstClockTime capture_sys;
   GstClockTime now_sys, now_pipeline, capture_pipeline;
   GstClockTime capture_delay = 0, base_time;
   GstClockTime stream_time, timestamp;
 
   clock = gst_element_get_clock (GST_ELEMENT_CAST (src));
+  base_time = gst_element_get_base_time (GST_ELEMENT_CAST (src));
 
   // AJA seems to use the real time clock, not the monotonic clock
   now_sys = g_get_real_time ();
   now_pipeline = gst_clock_get_time (clock);
+  capture_sys = videoBuff ? videoBuff->timeStamp / 10 : now_sys;
   // We can actually calculate how far in the past the frame was captured
   if (now_sys >= capture_sys && now_sys - capture_sys < 1000000 /* 1s */ ) {
     capture_delay = now_sys - capture_sys;
@@ -901,14 +918,41 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
   else
     capture_pipeline = 0;
 
-  base_time = gst_element_get_base_time (GST_ELEMENT_CAST (src));
   if (capture_pipeline > base_time)
     capture_pipeline -= base_time;
   else
     capture_pipeline = 0;
 
-  stream_time =
-      gst_util_uint64_scale (videoBuff->frameNumber,
+  // Check if we switched from having no signal to having signal,
+  // or the other way around
+  if (!videoBuff || (!videoBuff->haveSignal && src->have_signal)) {
+    if (src->have_signal) {
+      g_object_notify (G_OBJECT (src), "signal");
+      GST_ELEMENT_WARNING (GST_ELEMENT (src), RESOURCE, READ, ("No signal"),
+          ("No input source was detected - video frames invalid"));
+    }
+
+    src->have_signal = FALSE;
+    if (videoBuff)
+      src->input->ntv2AVHevc->ReleaseVideoBuffer (videoBuff);
+
+    return;
+  } else if ((videoBuff->haveSignal && !src->have_signal) || src->discont_time == GST_CLOCK_TIME_NONE) {
+    src->have_signal = TRUE;
+
+    // We got a first buffer before already, so we got signal *back*
+    if (src->discont_time != GST_CLOCK_TIME_NONE) {
+      g_object_notify (G_OBJECT (src), "signal");
+      GST_ELEMENT_INFO (GST_ELEMENT (src), RESOURCE, READ, ("Signal found"),
+          ("Input source detected"));
+    }
+
+    src->discont_time = capture_pipeline;
+    src->discont_frame_number = videoBuff->frameNumber;
+  }
+
+  stream_time = src->discont_time +
+      gst_util_uint64_scale (videoBuff->frameNumber - src->discont_frame_number,
       src->input->mode->fps_d * GST_SECOND, src->input->mode->fps_n);
 
   //GST_ERROR_OBJECT (src, "Got video frame at %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_time));

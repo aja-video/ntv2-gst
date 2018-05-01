@@ -60,6 +60,7 @@ typedef struct
     uint32_t        timeCodeHigh;           /// Time code data high
     uint64_t        timeStamp;              /// Time stamp of video data
     bool            lastFrame;              /// Indicates last captured frame
+    bool            haveSignal;             /// true if we actually have signal
 } AjaVideoBuff;
 
 
@@ -74,6 +75,7 @@ typedef struct
     uint32_t        frameNumber;            /// Frame number
     uint64_t        timeStamp;              /// Time stamp of video data
     bool            lastFrame;              /// Indicates last captured frame
+    bool            haveSignal;             /// true if we actually have signal
 } AjaAudioBuff;
 
         
