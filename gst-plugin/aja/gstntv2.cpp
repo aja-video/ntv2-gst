@@ -1181,7 +1181,45 @@ NTV2GstAV::ACInputWorker (void)
       GstMapInfo video_map, audio_map;
 
       NTV2VideoFormat inputVideoFormat = mDevice.GetInputVideoFormat(mInputSource);
-      pVideoData->haveSignal = (mVideoFormat == inputVideoFormat);
+
+      // For quad mode, we will get the format of a single input
+      NTV2VideoFormat effectiveVideoFormat = mVideoFormat;
+      switch (mVideoFormat) {
+        case NTV2_FORMAT_4x1920x1080p_2500:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2500;
+          break;
+        case NTV2_FORMAT_4x1920x1080p_3000:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_3000;
+          break;
+        case NTV2_FORMAT_4x1920x1080p_5000:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_5000_A;
+          break;
+        case NTV2_FORMAT_4x1920x1080p_5994:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_5994_A;
+          break;
+        case NTV2_FORMAT_4x1920x1080p_6000:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_6000_A;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_2500:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_2500;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_3000:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_3000;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_5000:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_5000_A;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_5994:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_5994_A;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_6000:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_6000_A;
+          break;
+        default:
+          break;
+      }
+
+      pVideoData->haveSignal = (effectiveVideoFormat == inputVideoFormat);
       if (!pVideoData->haveSignal && timeoutStart == GST_CLOCK_TIME_NONE) {
         timeoutStart = gst_util_get_timestamp ();
       }
