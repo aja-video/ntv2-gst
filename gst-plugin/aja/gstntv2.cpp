@@ -161,6 +161,13 @@ AJAStatus
   mCaptureTall = inCaptureTall;
   mPassthrough = mPassthrough;
 
+  if (mQuad) {
+    if (mInputChannel != NTV2_CHANNEL1 && mInputChannel != NTV2_CHANNEL5) {
+      GST_ERROR ("Quad mode requires channel 1 or 5");
+      return AJA_STATUS_FAIL;
+    }
+  }
+
   //  If we are in auto mode then do nothing if we are already running, otherwise force raw, 422, 8 bit.
   //  This flag shoud only be driven by the audiosrc to either start a non running channel without having
   //  to know anything about the video or to latch onto an alreay running channel in the event it has been
@@ -297,9 +304,9 @@ NTV2GstAV::Quit (void)
   //  Stop video capture
   mDevice.SetMode (mInputChannel, NTV2_MODE_DISPLAY, false);
   if (mQuad) {
-    mDevice.SetMode (NTV2_CHANNEL2, NTV2_MODE_DISPLAY, false);
-    mDevice.SetMode (NTV2_CHANNEL3, NTV2_MODE_DISPLAY, false);
-    mDevice.SetMode (NTV2_CHANNEL4, NTV2_MODE_DISPLAY, false);
+    mDevice.SetMode ((NTV2Channel) (mInputChannel + 1), NTV2_MODE_DISPLAY, false);
+    mDevice.SetMode ((NTV2Channel) (mInputChannel + 2), NTV2_MODE_DISPLAY, false);
+    mDevice.SetMode ((NTV2Channel) (mInputChannel + 3), NTV2_MODE_DISPLAY, false);
   }
 }
 
@@ -559,25 +566,25 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   //    Setup frame buffer
   if (mQuad) {
     //    Set capture mode
-    mDevice.SetMode (NTV2_CHANNEL2, NTV2_MODE_CAPTURE, false);
-    mDevice.SetMode (NTV2_CHANNEL3, NTV2_MODE_CAPTURE, false);
-    mDevice.SetMode (NTV2_CHANNEL4, NTV2_MODE_CAPTURE, false);
+    mDevice.SetMode ((NTV2Channel) (mInputChannel + 1), NTV2_MODE_CAPTURE, false);
+    mDevice.SetMode ((NTV2Channel) (mInputChannel + 2), NTV2_MODE_CAPTURE, false);
+    mDevice.SetMode ((NTV2Channel) (mInputChannel + 3), NTV2_MODE_CAPTURE, false);
 
     //    Set frame buffer format
-    mDevice.SetFrameBufferFormat (NTV2_CHANNEL2, mPixelFormat);
-    mDevice.SetFrameBufferFormat (NTV2_CHANNEL3, mPixelFormat);
-    mDevice.SetFrameBufferFormat (NTV2_CHANNEL4, mPixelFormat);
+    mDevice.SetFrameBufferFormat ((NTV2Channel) (mInputChannel + 1), mPixelFormat);
+    mDevice.SetFrameBufferFormat ((NTV2Channel) (mInputChannel + 2), mPixelFormat);
+    mDevice.SetFrameBufferFormat ((NTV2Channel) (mInputChannel + 3), mPixelFormat);
 
     //    Enable frame buffers
-    mDevice.EnableChannel (NTV2_CHANNEL2);
-    mDevice.EnableChannel (NTV2_CHANNEL3);
-    mDevice.EnableChannel (NTV2_CHANNEL4);
+    mDevice.EnableChannel ((NTV2Channel) (mInputChannel + 1));
+    mDevice.EnableChannel ((NTV2Channel) (mInputChannel + 2));
+    mDevice.EnableChannel ((NTV2Channel) (mInputChannel + 3));
 
     if (::NTV2DeviceHasBiDirectionalSDI (mDeviceID)) {
-      mDevice.SetSDITransmitEnable (NTV2_CHANNEL1, false);
-      mDevice.SetSDITransmitEnable (NTV2_CHANNEL2, false);
-      mDevice.SetSDITransmitEnable (NTV2_CHANNEL3, false);
-      mDevice.SetSDITransmitEnable (NTV2_CHANNEL4, false);
+      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel), false);
+      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel + 1), false);
+      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel + 2), false);
+      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel + 3), false);
       mDevice.WaitForOutputVerticalInterrupt ();
       mDevice.WaitForOutputVerticalInterrupt ();
       mDevice.WaitForOutputVerticalInterrupt ();
@@ -718,10 +725,15 @@ AJAStatus NTV2GstAV::SetupVideo (void)
 
   // Enable UHD/4k quad mode
   if (mQuad) {
-    router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
-    router.AddConnection(NTV2_XptFrameBuffer3Input, NTV2_XptSDIIn3);
-    router.AddConnection(NTV2_XptFrameBuffer4Input, NTV2_XptSDIIn4);
-    mInputChannel = NTV2_CHANNEL1;
+    if (mInputChannel == NTV2_CHANNEL1) {
+      router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
+      router.AddConnection(NTV2_XptFrameBuffer3Input, NTV2_XptSDIIn3);
+      router.AddConnection(NTV2_XptFrameBuffer4Input, NTV2_XptSDIIn4);
+    } else {
+      router.AddConnection(NTV2_XptFrameBuffer6Input, NTV2_XptSDIIn6);
+      router.AddConnection(NTV2_XptFrameBuffer7Input, NTV2_XptSDIIn7);
+      router.AddConnection(NTV2_XptFrameBuffer8Input, NTV2_XptSDIIn8);
+    }
     mOutputChannel = NTV2_CHANNEL5;
     mEncodeChannel = M31_CH0;
   }
