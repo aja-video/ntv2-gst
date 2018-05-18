@@ -1,0 +1,21 @@
+This module contains code to build the AJA GStreamer pluggin.  Currently AJA
+provides source elements for Uncompressed video (x-raw), HEVC/H.265 Compressed video (x-h265), 
+and uncompressed PCM audio (x-raw S16LE, S32LE).
+
+This code is provided under a LGPL license [1].
+
+The elements need to link with static builds of ajabase and ajantv2.
+
+Build ajabase and ajantv2:
+
+    make -C ajalibraries/ajabase
+    make -C ajalibraries/ajantv2
+
+Build the gst plugin:
+
+    cd ajaplugins/gstreamer/gst-plugin
+    ./autogen.sh
+    make
+    sudo make install
+
+[1] http://www.opensource.org/licenses/lgpl-license.php or COPYING.LIB
