@@ -6,6 +6,7 @@ This code is provided under a LGPL license [1].
 
 Build the pluggin like this:
 
+    export GST_NTV2=your_ntv2_dir
     cd gst-plugin
     ./autogen.sh
     make

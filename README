@@ -13,9 +13,15 @@ Build ajabase and ajantv2:
 
 Build the gst plugin:
 
+    export GST_NTV2=your_ntv2_dir
     cd ajaplugins/gstreamer/gst-plugin
     ./autogen.sh
     make
     sudo make install
+
+Test the gst plugin:
+
+    export GST_PLUGIN_PATH=/usr/local/lib/gstreamer-1.0
+	gst-launch-1.0 ajavideosrc ! videoconvert ! autovideosink
 
 [1] http://www.opensource.org/licenses/lgpl-license.php or COPYING.LIB

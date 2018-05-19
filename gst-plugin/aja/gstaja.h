@@ -228,7 +228,7 @@ struct _GstAjaClockClass
 };
 
 GType gst_aja_clock_get_type (void);
-static GstClock *gst_aja_clock_new (const gchar * name);
+GstClock *gst_aja_clock_new (const gchar * name);
 
 
 void    gst_set_aja_clock_and_element (GstElement * element, gboolean is_audio);

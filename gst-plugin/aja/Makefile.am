@@ -7,15 +7,15 @@ libgstaja_la_CPPFLAGS = \
 	$(GST_CFLAGS) \
 	-DAJALinux=1 \
 	-DAJA_LINUX=1 \
-	-I$(srcdir)/../../../../ajalibraries/ajantv2/includes \
-	-I$(srcdir)/../../../../ajalibraries/ajantv2/src \
-	-I$(srcdir)/../../../../ajalibraries/ajantv2/src/lin \
-	-I$(srcdir)/../../../../ajalibraries/ajantv2/codecs/hevc/m31 \
-	-I$(srcdir)/../../../../ajalibraries/ajabase \
-	-I$(srcdir)/../../../../ajalibraries
+	-I$(GST_NTV2)/ajalibraries/ajantv2/includes \
+	-I$(GST_NTV2)/ajalibraries/ajantv2/src \
+	-I$(GST_NTV2)/ajalibraries/ajantv2/src/lin \
+	-I$(GST_NTV2)/ajalibraries/ajantv2/codecs/hevc/m31 \
+	-I$(GST_NTV2)/ajalibraries/ajabase \
+	-I$(GST_NTV2)/ajalibraries
 
 libgstaja_la_LIBADD = \
-	-L$(srcdir)/../../../../lib \
+	-L$(GST_NTV2)/lib \
 	$(GST_PLUGINS_BASE_LIBS) \
 	-lgstaudio-1.0 \
 	-lgstvideo-1.0 \
@@ -45,9 +45,4 @@ noinst_HEADERS = \
 	gstaja.h \
 	gstajavideosrc.h \
 	gstajahevcsrc.h \
-	gstajaaudiosrc.cpp \
-	gstajavideosink.cpp \
-	gstajaaudiosink.cpp \
-	gstntv2.h \
-	../../../../ajalibraries/ajantv2/includes/ntv2enums.h \
-	../../../../ajalibraries/ajantv2/includes/ntv2m31enums.h
+	gstntv2.h

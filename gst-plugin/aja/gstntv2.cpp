@@ -154,16 +154,16 @@ AJAStatus NTV2GstAVHevc::Init (const M31VideoPreset         inPreset,
         if (mBitDepth == 8)
         {
             if (mIs422)
-                mPixelFormat = NTV2_FBF_8BIT_YCBCR_422PL;
+                mPixelFormat = NTV2_FBF_8BIT_YCBCR_422PL2;
             else
-                mPixelFormat = NTV2_FBF_8BIT_YCBCR_420PL;
+                mPixelFormat = NTV2_FBF_8BIT_YCBCR_420PL2;
         }
         else
         {
             if (mIs422)
-                mPixelFormat = NTV2_FBF_10BIT_YCBCR_422PL;
+                mPixelFormat = NTV2_FBF_10BIT_YCBCR_422PL2;
             else
-                mPixelFormat = NTV2_FBF_10BIT_YCBCR_420PL;
+                mPixelFormat = NTV2_FBF_10BIT_YCBCR_420PL2;
         }
     }
     else
@@ -592,8 +592,10 @@ AJAStatus NTV2GstAVHevc::SetupVideo (void)
 
 AJAStatus NTV2GstAVHevc::SetupAudio (void)
 {
+	ULWord numAudio = ::NTV2DeviceGetNumAudioSystems(mDeviceID);
+	
     //	In multiformat mode, base the audio system on the channel...
-    if (mMultiStream && ::NTV2DeviceGetNumAudioStreams (mDeviceID) > 1 && UWord (mInputChannel) < ::NTV2DeviceGetNumAudioStreams (mDeviceID))
+    if (mMultiStream && numAudio > 1 && UWord (mInputChannel) < numAudio)
 		mAudioSystem = ::NTV2ChannelToAudioSystem (mInputChannel);
 
 	//	Have the audio system capture audio from the designated device input (i.e., ch1 uses SDIIn1, ch2 uses SDIIn2, etc.)...
@@ -614,7 +616,7 @@ AJAStatus NTV2GstAVHevc::SetupAudio (void)
 
 void NTV2GstAVHevc::SetupHostBuffers (void)
 {
-	mVideoBufferSize = GetVideoActiveSize (mVideoFormat, mPixelFormat, false, false);
+	mVideoBufferSize = GetVideoActiveSize (mVideoFormat, mPixelFormat, NTV2_VANCMODE_OFF);
     mPicInfoBufferSize = sizeof(HevcPictureInfo)*2;
     mEncInfoBufferSize = sizeof(HevcEncodedInfo)*2;
     mAudioBufferSize = NTV2_AUDIOSIZE_MAX;

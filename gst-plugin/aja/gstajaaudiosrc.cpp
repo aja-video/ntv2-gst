@@ -657,7 +657,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     
     
     const guint8 *data;
-    glong sample_count;
+    glong sample_count = 0;
     gsize data_size;
     AjaAudioPacket *ap;
     AjaCaptureAudioPacket *p;

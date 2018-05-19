@@ -357,7 +357,7 @@ gst_aja_clock_init (GstAjaClock * clock)
     GST_OBJECT_FLAG_SET (clock, GST_CLOCK_FLAG_CAN_SET_MASTER);
 }
 
-static GstClock *
+GstClock *
 gst_aja_clock_new (const gchar * name)
 {
     GstAjaClock *self =
