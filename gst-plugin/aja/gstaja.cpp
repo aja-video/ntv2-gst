@@ -36,8 +36,8 @@ GST_DEBUG_CATEGORY_STATIC (gst_aja_debug);
 typedef struct _Device Device;
 struct _Device
 {
-  GstAjaOutput output[NTV2_CHANNEL8];
-  GstAjaInput input[NTV2_CHANNEL8];
+  GstAjaOutput output[NTV2_MAX_NUM_CHANNELS];
+  GstAjaInput input[NTV2_MAX_NUM_CHANNELS];
 };
 
 G_LOCK_DEFINE_STATIC (devices);
@@ -48,6 +48,8 @@ gst_aja_acquire_input (const gchar * inDeviceSpecifier, gint channel,
     GstElement * src, gboolean is_audio, gboolean is_hevc)
 {
   GstAjaInput *input;
+
+  g_return_val_if_fail (channel >= 0 && channel < NTV2_MAX_NUM_CHANNELS, NULL);
 
   G_LOCK (devices);
   if (!devices)

@@ -170,7 +170,7 @@ gst_aja_audio_src_class_init (GstAjaAudioSrcClass * klass)
       g_param_spec_uint ("input-channel",
           "Input channel",
           "Input channel to use",
-          0, G_MAXINT, DEFAULT_INPUT_CHANNEL,
+          0, NTV2_MAX_NUM_CHANNELS - 1, DEFAULT_INPUT_CHANNEL,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               G_PARAM_CONSTRUCT)));
 
