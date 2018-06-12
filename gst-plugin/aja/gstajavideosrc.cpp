@@ -927,12 +927,12 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
   // or the other way around
   if (!videoBuff || (!videoBuff->haveSignal && src->have_signal)) {
     if (src->have_signal) {
+      src->have_signal = FALSE;
       g_object_notify (G_OBJECT (src), "signal");
       GST_ELEMENT_WARNING (GST_ELEMENT (src), RESOURCE, READ, ("No signal"),
           ("No input source was detected - video frames invalid"));
     }
 
-    src->have_signal = FALSE;
     if (videoBuff)
       src->input->ntv2AVHevc->ReleaseVideoBuffer (videoBuff);
 
