@@ -1011,10 +1011,54 @@ NTV2GstAV::SetupAutoCirculate (void)
   mInputTransferStruct.Clear ();
   mInputTransferStruct.acFrameBufferFormat = mPixelFormat;
 
+  int frameStart, frameEnd;
+
+  // FIXME: This works around a bug in the SDK. In theory by
+  // setting the number of frames to circulate only it should
+  // figure out correct start/end frame indices, but this causes
+  // corrupted output.
+  //
+  // Let's assume at least 6 frames per channel here and calculate
+  // our own indices
+  switch (mInputChannel) {
+    case NTV2_CHANNEL1:
+      frameStart = 0;
+      break;
+    case NTV2_CHANNEL2:
+      frameStart = 7;
+      break;
+    case NTV2_CHANNEL3:
+      frameStart = 14;
+      break;
+    case NTV2_CHANNEL4:
+      frameStart = 21;
+      break;
+    case NTV2_CHANNEL5:
+      frameStart = 28;
+      break;
+    case NTV2_CHANNEL6:
+      frameStart = 35;
+      break;
+    case NTV2_CHANNEL7:
+      frameStart = 42;
+      break;
+    case NTV2_CHANNEL8:
+      frameStart = 49;
+      break;
+    default:
+      g_assert_not_reached ();
+      break;
+  }
+
+  frameEnd = frameStart + 6;
+
   mDevice.AutoCirculateStop (mInputChannel);
-  mDevice.AutoCirculateInitForInput (mInputChannel, 8,  //    Frames to circulate
+  mDevice.AutoCirculateInitForInput (mInputChannel, 0,  //    Frames to circulate
       mAudioSystem,             //    Which audio system
-      AUTOCIRCULATE_WITH_RP188);        //    With RP188?
+      AUTOCIRCULATE_WITH_RP188, //    With RP188?
+      1,                        //    1 channel
+      frameStart,
+      frameEnd);
 }
 
 
