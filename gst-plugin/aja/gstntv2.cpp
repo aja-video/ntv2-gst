@@ -1148,6 +1148,7 @@ NTV2GstAV::ACInputWorker (void)
 
   if (mTimecodeMode == NTV2_TCINDEX_LTC1 || mTimecodeMode == NTV2_TCINDEX_LTC2) {
     tcIndex = mTimecodeMode;
+    mDevice.SetLTCInputEnable (true);
   } else {
     switch (mInputChannel) {
       default:
