@@ -938,10 +938,9 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
 
     return;
   } else if ((videoBuff->haveSignal && !src->have_signal) || src->discont_time == GST_CLOCK_TIME_NONE) {
-    src->have_signal = TRUE;
+    if (!src->have_signal) {
+      src->have_signal = TRUE;
 
-    // We got a first buffer before already, so we got signal *back*
-    if (src->discont_time != GST_CLOCK_TIME_NONE) {
       g_object_notify (G_OBJECT (src), "signal");
       GST_ELEMENT_INFO (GST_ELEMENT (src), RESOURCE, READ, ("Signal found"),
           ("Input source detected"));
