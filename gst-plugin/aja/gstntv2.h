@@ -192,6 +192,12 @@ class NTV2GstAV
         **/
         virtual bool            GetHardwareClock(uint64_t desiredTimeScale, uint64_t * time);
 
+
+        /**
+            @brief    Update the currently configured timecode index
+        **/
+        virtual void            UpdateTimecodeIndex(const NTV2TCIndex inTimeCode);
+
     
     //    Protected Instance Methods
     protected:

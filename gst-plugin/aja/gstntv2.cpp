@@ -1144,80 +1144,7 @@ NTV2GstAV::ACInputWorker (void)
   guint64 timeoutStart = GST_CLOCK_TIME_NONE;
 
   // Choose timecode source
-  NTV2TCIndex tcIndex;
-
-  if (mTimecodeMode == NTV2_TCINDEX_LTC1 || mTimecodeMode == NTV2_TCINDEX_LTC2) {
-    tcIndex = mTimecodeMode;
-    mDevice.SetLTCInputEnable (true);
-  } else {
-    switch (mInputChannel) {
-      default:
-      case NTV2_CHANNEL1:
-        if (mTimecodeMode == NTV2_TCINDEX_SDI1)
-          tcIndex = NTV2_TCINDEX_SDI1_LTC;
-        else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
-          tcIndex = NTV2_TCINDEX_SDI1_LTC;
-        else
-          tcIndex = NTV2_TCINDEX_SDI1_2;
-        break;
-      case NTV2_CHANNEL2:
-        if (mTimecodeMode == NTV2_TCINDEX_SDI1)
-          tcIndex = NTV2_TCINDEX_SDI2_LTC;
-        else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
-          tcIndex = NTV2_TCINDEX_SDI2_LTC;
-        else
-          tcIndex = NTV2_TCINDEX_SDI2_2;
-        break;
-      case NTV2_CHANNEL3:
-        if (mTimecodeMode == NTV2_TCINDEX_SDI1)
-          tcIndex = NTV2_TCINDEX_SDI3_LTC;
-        else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
-          tcIndex = NTV2_TCINDEX_SDI3_LTC;
-        else
-          tcIndex = NTV2_TCINDEX_SDI3_2;
-        break;
-      case NTV2_CHANNEL4:
-        if (mTimecodeMode == NTV2_TCINDEX_SDI1)
-          tcIndex = NTV2_TCINDEX_SDI4_LTC;
-        else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
-          tcIndex = NTV2_TCINDEX_SDI4_LTC;
-        else
-          tcIndex = NTV2_TCINDEX_SDI4_2;
-        break;
-      case NTV2_CHANNEL5:
-        if (mTimecodeMode == NTV2_TCINDEX_SDI1)
-          tcIndex = NTV2_TCINDEX_SDI5_LTC;
-        else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
-          tcIndex = NTV2_TCINDEX_SDI5_LTC;
-        else
-          tcIndex = NTV2_TCINDEX_SDI5_2;
-        break;
-      case NTV2_CHANNEL6:
-        if (mTimecodeMode == NTV2_TCINDEX_SDI1)
-          tcIndex = NTV2_TCINDEX_SDI6_LTC;
-        else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
-          tcIndex = NTV2_TCINDEX_SDI6_LTC;
-        else
-          tcIndex = NTV2_TCINDEX_SDI6_2;
-        break;
-      case NTV2_CHANNEL7:
-        if (mTimecodeMode == NTV2_TCINDEX_SDI1)
-          tcIndex = NTV2_TCINDEX_SDI7_LTC;
-        else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
-          tcIndex = NTV2_TCINDEX_SDI7_LTC;
-        else
-          tcIndex = NTV2_TCINDEX_SDI7_2;
-        break;
-      case NTV2_CHANNEL8:
-        if (mTimecodeMode == NTV2_TCINDEX_SDI1)
-          tcIndex = NTV2_TCINDEX_SDI8_LTC;
-        else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
-          tcIndex = NTV2_TCINDEX_SDI8_LTC;
-        else
-          tcIndex = NTV2_TCINDEX_SDI8_2;
-        break;
-    }
-  }
+  NTV2TCIndex tcIndex, configuredTcIndex = (NTV2TCIndex)-1;
 
   // start AutoCirculate running...
   mDevice.AutoCirculateStart (mInputChannel);
@@ -1225,6 +1152,83 @@ NTV2GstAV::ACInputWorker (void)
   while (!mGlobalQuit) {
     AUTOCIRCULATE_STATUS acStatus;
     mDevice.AutoCirculateGetStatus (mInputChannel, acStatus);
+
+    // Update timecode index if it changed since the last frame
+    if (configuredTcIndex == (NTV2TCIndex)-1 || configuredTcIndex != mTimecodeMode) {
+      configuredTcIndex = mTimecodeMode;
+      if (mTimecodeMode == NTV2_TCINDEX_LTC1 || mTimecodeMode == NTV2_TCINDEX_LTC2) {
+        tcIndex = mTimecodeMode;
+        mDevice.SetLTCInputEnable (true);
+      } else {
+        switch (mInputChannel) {
+          default:
+          case NTV2_CHANNEL1:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI1_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI1_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI1_2;
+            break;
+          case NTV2_CHANNEL2:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI2_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI2_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI2_2;
+            break;
+          case NTV2_CHANNEL3:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI3_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI3_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI3_2;
+            break;
+          case NTV2_CHANNEL4:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI4_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI4_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI4_2;
+            break;
+          case NTV2_CHANNEL5:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI5_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI5_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI5_2;
+            break;
+          case NTV2_CHANNEL6:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI6_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI6_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI6_2;
+            break;
+          case NTV2_CHANNEL7:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI7_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI7_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI7_2;
+            break;
+          case NTV2_CHANNEL8:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI8_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI8_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI8_2;
+            break;
+        }
+      }
+    }
 
     // wait for captured frame
     if (acStatus.acState == NTV2_AUTOCIRCULATE_RUNNING
@@ -1694,6 +1698,11 @@ bool NTV2GstAV::GetHardwareClock (uint64_t desiredTimeScale, uint64_t * time)
   return status;
 }
 
+void
+NTV2GstAV::UpdateTimecodeIndex(const NTV2TCIndex inTimeCode)
+{
+  mTimecodeMode = inTimeCode;
+}
 
 AJAStatus
     NTV2GstAV::DetermineInputFormat (NTV2Channel inputChannel, bool quad,

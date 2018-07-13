@@ -293,6 +293,37 @@ gst_aja_video_src_set_property (GObject * object, guint property_id,
 
     case PROP_TIMECODE_MODE:
       src->timecode_mode = (GstAjaTimecodeMode) g_value_get_enum (value);
+      if (src->input && src->input->ntv2AVHevc) {
+        NTV2TCIndex timecode_mode;
+
+        switch (src->timecode_mode) {
+          case GST_AJA_TIMECODE_MODE_VITC1:
+            timecode_mode = NTV2_TCINDEX_SDI1;
+            break;
+
+          case GST_AJA_TIMECODE_MODE_VITC2:
+            timecode_mode = NTV2_TCINDEX_SDI1_2;
+            break;
+
+          case GST_AJA_TIMECODE_MODE_ANALOG_LTC1:
+            timecode_mode = NTV2_TCINDEX_LTC1;
+            break;
+
+          case GST_AJA_TIMECODE_MODE_ANALOG_LTC2:
+            timecode_mode = NTV2_TCINDEX_LTC2;
+            break;
+
+          case GST_AJA_TIMECODE_MODE_ATC_LTC:
+            timecode_mode = NTV2_TCINDEX_SDI1_LTC;
+            break;
+
+          default:
+            g_assert_not_reached ();
+            break;
+        }
+        src->input->ntv2AVHevc->UpdateTimecodeIndex(timecode_mode);
+      }
+
       break;
 
     case PROP_OUTPUT_CC:
