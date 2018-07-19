@@ -1141,13 +1141,13 @@ NTV2GstAV::ACInputThreadStatic (AJAThread * pThread, void *pContext)
 void
 NTV2GstAV::ACInputWorker (void)
 {
-  guint64 timeoutStart = GST_CLOCK_TIME_NONE;
-
   // Choose timecode source
   NTV2TCIndex tcIndex, configuredTcIndex = (NTV2TCIndex)-1;
 
   // start AutoCirculate running...
   mDevice.AutoCirculateStart (mInputChannel);
+
+  bool haveSignal = true;
 
   while (!mGlobalQuit) {
     AUTOCIRCULATE_STATUS acStatus;
@@ -1230,6 +1230,47 @@ NTV2GstAV::ACInputWorker (void)
       }
     }
 
+    NTV2VideoFormat inputVideoFormat = mDevice.GetInputVideoFormat(mInputSource);
+
+    // For quad mode, we will get the format of a single input
+    NTV2VideoFormat effectiveVideoFormat = mVideoFormat;
+    switch (mVideoFormat) {
+      case NTV2_FORMAT_4x1920x1080p_2500:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_2500;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_3000:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_3000;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_5000:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_5000_A;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_5994:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_5994_A;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_6000:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_6000_A;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_2500:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_2500;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_3000:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_3000;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_5000:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_5000_A;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_5994:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_5994_A;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_6000:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_6000_A;
+        break;
+      default:
+        break;
+    }
+
+    haveSignal = (effectiveVideoFormat == inputVideoFormat);
+
     // wait for captured frame
     if (acStatus.acState == NTV2_AUTOCIRCULATE_RUNNING
         && acStatus.acBufferLevel > 1) {
@@ -1241,49 +1282,7 @@ NTV2GstAV::ACInputWorker (void)
           AcquireVideoBuffer ());
       GstMapInfo video_map, audio_map;
 
-      NTV2VideoFormat inputVideoFormat = mDevice.GetInputVideoFormat(mInputSource);
-
-      // For quad mode, we will get the format of a single input
-      NTV2VideoFormat effectiveVideoFormat = mVideoFormat;
-      switch (mVideoFormat) {
-        case NTV2_FORMAT_4x1920x1080p_2500:
-          effectiveVideoFormat = NTV2_FORMAT_1080p_2500;
-          break;
-        case NTV2_FORMAT_4x1920x1080p_3000:
-          effectiveVideoFormat = NTV2_FORMAT_1080p_3000;
-          break;
-        case NTV2_FORMAT_4x1920x1080p_5000:
-          effectiveVideoFormat = NTV2_FORMAT_1080p_5000_A;
-          break;
-        case NTV2_FORMAT_4x1920x1080p_5994:
-          effectiveVideoFormat = NTV2_FORMAT_1080p_5994_A;
-          break;
-        case NTV2_FORMAT_4x1920x1080p_6000:
-          effectiveVideoFormat = NTV2_FORMAT_1080p_6000_A;
-          break;
-        case NTV2_FORMAT_4x2048x1080p_2500:
-          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_2500;
-          break;
-        case NTV2_FORMAT_4x2048x1080p_3000:
-          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_3000;
-          break;
-        case NTV2_FORMAT_4x2048x1080p_5000:
-          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_5000_A;
-          break;
-        case NTV2_FORMAT_4x2048x1080p_5994:
-          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_5994_A;
-          break;
-        case NTV2_FORMAT_4x2048x1080p_6000:
-          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_6000_A;
-          break;
-        default:
-          break;
-      }
-
-      pVideoData->haveSignal = (effectiveVideoFormat == inputVideoFormat);
-      if (!pVideoData->haveSignal && timeoutStart == GST_CLOCK_TIME_NONE) {
-        timeoutStart = gst_util_get_timestamp ();
-      }
+      pVideoData->haveSignal = haveSignal;
 
       if (pVideoData->buffer) {
         gst_buffer_map (pVideoData->buffer, &video_map, GST_MAP_READWRITE);
@@ -1294,7 +1293,7 @@ NTV2GstAV::ACInputWorker (void)
           pVideoData->videoBufferSize);
 
       AjaAudioBuff *pAudioData = AcquireAudioBuffer ();
-      pAudioData->haveSignal = pVideoData->haveSignal;
+      pAudioData->haveSignal = haveSignal;
       if (pAudioData->buffer) {
         gst_buffer_map (pAudioData->buffer, &audio_map, GST_MAP_READWRITE);
         pAudioData->pAudioBuffer = (uint32_t *) audio_map.data;
@@ -1448,16 +1447,13 @@ NTV2GstAV::ACInputWorker (void)
           mLastFrameAudioOut = true;
           break;
       } else {
-        if (!mDevice.WaitForInputVerticalInterrupt (mInputChannel)) {
-          if (timeoutStart == GST_CLOCK_TIME_NONE) {
-            timeoutStart = gst_util_get_timestamp ();
-          } else if (gst_util_get_timestamp() - timeoutStart >= 100 * GST_MSECOND) {
-            // Only report missing frames a) every 100ms and b) if there
-            // actually was no frame for 100ms
-            DoCallback (VIDEO_CALLBACK, NULL);
-            DoCallback (AUDIO_CALLBACK, NULL);
-            timeoutStart = GST_CLOCK_TIME_NONE;
-          }
+        if (haveSignal) {
+          mDevice.WaitForInputVerticalInterrupt (mInputChannel);
+        } else {
+          DoCallback (VIDEO_CALLBACK, NULL);
+          DoCallback (AUDIO_CALLBACK, NULL);
+          // Short enough to not miss any frames at 60fps / 16.667ms per frame
+          g_usleep (16000);
         }
       }
     }
