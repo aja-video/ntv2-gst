@@ -852,7 +852,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
 #if GST_CHECK_VERSION (1, 13, 0)
   gst_buffer_add_reference_timestamp_meta (*buffer,
-      gst_static_caps_get (&stream_reference), stream_time, NULL);
+      gst_static_caps_get (&stream_reference), stream_time, GST_CLOCK_TIME_NONE);
 #endif
 
 #if 0
