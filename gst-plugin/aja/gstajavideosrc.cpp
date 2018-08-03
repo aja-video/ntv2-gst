@@ -1190,7 +1190,8 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
   f = NULL;
 
   GST_BUFFER_TIMESTAMP (*buffer) = capture_time;
-  GST_BUFFER_DURATION (*buffer) = GST_CLOCK_TIME_NONE;
+  GST_BUFFER_DURATION (*buffer) = gst_util_uint64_scale_int (GST_SECOND,
+      src->input->mode->fps_d, src->input->mode->fps_n);
 
   if (timecode_valid) {
     uint8_t hours, minutes, seconds, frames;
