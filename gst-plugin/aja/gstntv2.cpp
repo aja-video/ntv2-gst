@@ -188,13 +188,18 @@ AJAStatus
   // Ensure that mCaptureTall is only set for formats that can
   // actually contain VANC and that we handle
   switch (mVideoFormat) {
+    case NTV2_FORMAT_720p_2398:
+    case NTV2_FORMAT_720p_2500:
     case NTV2_FORMAT_720p_5000:
     case NTV2_FORMAT_720p_5994:
     case NTV2_FORMAT_720p_6000:
     case NTV2_FORMAT_1080i_5000:
     case NTV2_FORMAT_1080i_5994:
     case NTV2_FORMAT_1080i_6000:
+    case NTV2_FORMAT_1080p_2398:
+    case NTV2_FORMAT_1080p_2400:
     case NTV2_FORMAT_1080p_2500:
+    case NTV2_FORMAT_1080p_2997:
     case NTV2_FORMAT_1080p_3000:
     case NTV2_FORMAT_1080p_5000_A:
     case NTV2_FORMAT_1080p_5994_A:
