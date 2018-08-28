@@ -1207,9 +1207,14 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     }
     // Any better way to detect this?
     if (src->input->mode->fps_d == 1001) {
-      flags =
-          (GstVideoTimeCodeFlags) (flags |
-          GST_VIDEO_TIME_CODE_FLAGS_DROP_FRAME);
+      if (src->input->mode->fps_n == 30000 || src->input->mode->fps_n == 60000)
+        flags =
+            (GstVideoTimeCodeFlags) (flags |
+            GST_VIDEO_TIME_CODE_FLAGS_DROP_FRAME);
+      else
+        flags =
+                (GstVideoTimeCodeFlags) (flags &
+                ~GST_VIDEO_TIME_CODE_FLAGS_DROP_FRAME);
     }
 
     hours = (((timecode_high & RP188_HOURTENS_MASK) >> 24) * 10) +
