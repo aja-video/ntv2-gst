@@ -1320,26 +1320,26 @@ NTV2GstAV::ACInputWorker (void)
         mDevice.GetFrameGeometry (&currentGeometry);
         switch (currentGeometry) {
           case NTV2_FG_1920x1112:
-            // 30 line offset (or 32?)
+            // 32 line offset
             // FIXME : Remove hardcording once gstntv2 is gstvideoformat aware
             if (mBitDepth == 8)
-              offset = 30 * 1920 * 2;
+              offset = 32 * 1920 * 2;
             else
-              offset = 30 * 1920 * 16 / 6;
+              offset = 32 * 1920 * 16 / 6;
             validVanc = true;
             break;
           case NTV2_FG_1280x740:
-            // 19 line offset (or 20 ?)
+            // 20 line offset
             // FIXME : Remove hardcording once gstntv2 is gstvideoformat aware
             if (mBitDepth == 8)
-              offset = 19 * 1280 * 2;
+              offset = 20 * 1280 * 2;
             else
-              offset = 19 * 1296 * 16 / 6;
+              offset = 20 * 1296 * 16 / 6;
             validVanc = true;
             break;
           default:
             if (mCaptureTall)
-              GST_ERROR ("UNKNOWN GEOMETRY !");
+              GST_ERROR ("UNKNOWN GEOMETRY %u!", currentGeometry);
             break;
         }
         GST_DEBUG ("offset %" G_GSIZE_FORMAT, offset);
