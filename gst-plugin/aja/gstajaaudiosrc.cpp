@@ -744,9 +744,6 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
   GstFlowReturn flow_ret = GST_FLOW_OK;
 
-
-
-  const guint8 *data;
   glong sample_count = 0;
   gsize data_size;
   AjaCaptureAudioPacket *p;
@@ -773,7 +770,6 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     return GST_FLOW_FLUSHING;
   }
 
-  data = (const guint8 *) p->audio_buff->pAudioBuffer;
   data_size = (gsize) p->audio_buff->audioDataSize;
   sample_count = data_size / src->info.bpf;
 
