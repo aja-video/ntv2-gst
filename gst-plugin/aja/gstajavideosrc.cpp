@@ -24,8 +24,10 @@
 
 #include "gstajavideosrc.h"
 #include "gstajavideosrc.h"
-#include <gst/video/video-anc.h>
 
+#if GST_CHECK_VERSION(1, 15, 0)
+#include <gst/video/video-anc.h>
+#endif
 
 GST_DEBUG_CATEGORY_STATIC (gst_aja_video_src_debug);
 #define GST_CAT_DEFAULT gst_aja_video_src_debug
@@ -327,7 +329,11 @@ gst_aja_video_src_set_property (GObject * object, guint property_id,
       break;
 
     case PROP_OUTPUT_CC:
+#if GST_CHECK_VERSION(1, 15, 0)
       src->output_cc = g_value_get_boolean (value);
+#else
+      src->output_cc = FALSE;
+#endif
       break;
 
     default:
@@ -1042,6 +1048,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
   g_mutex_unlock (&src->lock);
 }
 
+#if GST_CHECK_VERSION(1, 15, 0)
 static void
 extract_cc_from_vbi (GstAjaVideoSrc * src, GstBuffer ** buffer,
     guint8 * ancillary_data)
@@ -1123,6 +1130,7 @@ extract_cc_from_vbi (GstAjaVideoSrc * src, GstBuffer ** buffer,
       GST_TIME_ARGS (after - before));
   gst_video_vbi_parser_free (parser);
 }
+#endif
 
 /* ask the subclass to create a buffer with offset and size, the default
  * implementation will call alloc and fill. */
@@ -1241,8 +1249,11 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
       GST_CLOCK_TIME_NONE);
 #endif
 
+#if GST_CHECK_VERSION(1, 15, 0)
   if (ancillary_data && src->output_cc)
     extract_cc_from_vbi (src, buffer, ancillary_data);
+#endif
+
 #if 1
   GST_DEBUG_OBJECT (src,
       "Outputting buffer %p with timestamp %" GST_TIME_FORMAT " and duration %"
