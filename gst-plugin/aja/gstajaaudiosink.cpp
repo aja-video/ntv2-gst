@@ -74,15 +74,15 @@ GST_STATIC_PAD_TEMPLATE ("sink",
     GST_PAD_SINK,
     GST_PAD_ALWAYS,
     GST_STATIC_CAPS ("audio/x-raw,format=S16LE,rate=[1,max],"
-      "channels=[1,max],layout=interleaved")
+        "channels=[1,max],layout=interleaved")
     );
 
 
 /* class initialization */
 
-G_DEFINE_TYPE_WITH_CODE (GstAjaaudiosink, gst_aja_audio_sink, GST_TYPE_AUDIO_SINK,
-  GST_DEBUG_CATEGORY_INIT (gst_aja_audio_sink_debug, "aja_audio_sink", 0,
-  "debug category for aja_audio_sink element"));
+G_DEFINE_TYPE_WITH_CODE (GstAjaaudiosink, gst_aja_audio_sink,
+    GST_TYPE_AUDIO_SINK, GST_DEBUG_CATEGORY_INIT (gst_aja_audio_sink_debug,
+        "aja_audio_sink", 0, "debug category for aja_audio_sink element"));
 
 static void
 gst_aja_audio_sink_class_init (GstAjaaudiosinkClass * klass)
@@ -92,10 +92,10 @@ gst_aja_audio_sink_class_init (GstAjaaudiosinkClass * klass)
 
   /* Setting up pads and setting metadata should be moved to
      base_class_init if you intend to subclass this class. */
-  gst_element_class_add_pad_template (GST_ELEMENT_CLASS(klass),
+  gst_element_class_add_pad_template (GST_ELEMENT_CLASS (klass),
       gst_static_pad_template_get (&gst_aja_audio_sink_sink_template));
 
-  gst_element_class_set_static_metadata (GST_ELEMENT_CLASS(klass),
+  gst_element_class_set_static_metadata (GST_ELEMENT_CLASS (klass),
       "FIXME Long name", "Generic", "FIXME Description",
       "FIXME <fixme@example.com>");
 
@@ -105,7 +105,8 @@ gst_aja_audio_sink_class_init (GstAjaaudiosinkClass * klass)
   gobject_class->finalize = gst_aja_audio_sink_finalize;
   audio_sink_class->open = GST_DEBUG_FUNCPTR (gst_aja_audio_sink_open);
   audio_sink_class->prepare = GST_DEBUG_FUNCPTR (gst_aja_audio_sink_prepare);
-  audio_sink_class->unprepare = GST_DEBUG_FUNCPTR (gst_aja_audio_sink_unprepare);
+  audio_sink_class->unprepare =
+      GST_DEBUG_FUNCPTR (gst_aja_audio_sink_unprepare);
   audio_sink_class->close = GST_DEBUG_FUNCPTR (gst_aja_audio_sink_close);
   audio_sink_class->write = GST_DEBUG_FUNCPTR (gst_aja_audio_sink_write);
   audio_sink_class->delay = GST_DEBUG_FUNCPTR (gst_aja_audio_sink_delay);
@@ -114,7 +115,7 @@ gst_aja_audio_sink_class_init (GstAjaaudiosinkClass * klass)
 }
 
 static void
-gst_aja_audio_sink_init (GstAjaaudiosink *aja_audio_sink)
+gst_aja_audio_sink_init (GstAjaaudiosink * aja_audio_sink)
 {
 }
 
@@ -247,4 +248,3 @@ gst_aja_audio_sink_reset (GstAudioSink * sink)
   GST_DEBUG_OBJECT (aja_audio_sink, "reset");
 
 }
-

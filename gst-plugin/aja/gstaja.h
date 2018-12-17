@@ -1,5 +1,6 @@
 /* GStreamer
  * Copyright (C) 2015 PSM <philm@aja.com>
+ * Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -30,19 +31,32 @@
 
 typedef enum
 {
+    GST_AJA_MODE_RAW_NTSC_8_2398i,
+    GST_AJA_MODE_RAW_NTSC_8_24i,
     GST_AJA_MODE_RAW_NTSC_8_5994i,
+    GST_AJA_MODE_RAW_NTSC_10_2398i,
+    GST_AJA_MODE_RAW_NTSC_10_24i,
     GST_AJA_MODE_RAW_NTSC_10_5994i,
     
     GST_AJA_MODE_RAW_PAL_8_50i,
     GST_AJA_MODE_RAW_PAL_10_50i,
     
+    GST_AJA_MODE_RAW_720_8_2398p,
+    GST_AJA_MODE_RAW_720_8_25p,
     GST_AJA_MODE_RAW_720_8_50p,
     GST_AJA_MODE_RAW_720_8_5994p,
     GST_AJA_MODE_RAW_720_8_60p,
+    GST_AJA_MODE_RAW_720_10_2398p,
+    GST_AJA_MODE_RAW_720_10_25p,
     GST_AJA_MODE_RAW_720_10_50p,
     GST_AJA_MODE_RAW_720_10_5994p,
     GST_AJA_MODE_RAW_720_10_60p,
     
+    GST_AJA_MODE_RAW_1080_8_2398p,
+    GST_AJA_MODE_RAW_1080_8_24p,
+    GST_AJA_MODE_RAW_1080_8_25p,
+    GST_AJA_MODE_RAW_1080_8_2997p,
+    GST_AJA_MODE_RAW_1080_8_30p,
     GST_AJA_MODE_RAW_1080_8_50i,
     GST_AJA_MODE_RAW_1080_8_50p,
     GST_AJA_MODE_RAW_1080_8_5994i,
@@ -50,6 +64,11 @@ typedef enum
     GST_AJA_MODE_RAW_1080_8_60i,
     GST_AJA_MODE_RAW_1080_8_60p,
     
+    GST_AJA_MODE_RAW_1080_10_2398p,
+    GST_AJA_MODE_RAW_1080_10_24p,
+    GST_AJA_MODE_RAW_1080_10_25p,
+    GST_AJA_MODE_RAW_1080_10_2997p,
+    GST_AJA_MODE_RAW_1080_10_30p,
     GST_AJA_MODE_RAW_1080_10_50i,
     GST_AJA_MODE_RAW_1080_10_50p,
     GST_AJA_MODE_RAW_1080_10_5994i,
@@ -57,13 +76,49 @@ typedef enum
     GST_AJA_MODE_RAW_1080_10_60i,
     GST_AJA_MODE_RAW_1080_10_60p,
     
+    GST_AJA_MODE_RAW_UHD_8_2398p,
+    GST_AJA_MODE_RAW_UHD_8_24p,
+    GST_AJA_MODE_RAW_UHD_8_25p,
+    GST_AJA_MODE_RAW_UHD_8_2997p,
+    GST_AJA_MODE_RAW_UHD_8_30p,
     GST_AJA_MODE_RAW_UHD_8_50p,
     GST_AJA_MODE_RAW_UHD_8_5994p,
     GST_AJA_MODE_RAW_UHD_8_60p,
     
+    GST_AJA_MODE_RAW_UHD_10_2398p,
+    GST_AJA_MODE_RAW_UHD_10_24p,
+    GST_AJA_MODE_RAW_UHD_10_25p,
+    GST_AJA_MODE_RAW_UHD_10_2997p,
+    GST_AJA_MODE_RAW_UHD_10_30p,
     GST_AJA_MODE_RAW_UHD_10_50p,
     GST_AJA_MODE_RAW_UHD_10_5994p,
     GST_AJA_MODE_RAW_UHD_10_60p,
+    
+    GST_AJA_MODE_RAW_4K_8_2398p,
+    GST_AJA_MODE_RAW_4K_8_24p,
+    GST_AJA_MODE_RAW_4K_8_25p,
+    GST_AJA_MODE_RAW_4K_8_2997p,
+    GST_AJA_MODE_RAW_4K_8_30p,
+    GST_AJA_MODE_RAW_4K_8_4795p,
+    GST_AJA_MODE_RAW_4K_8_48p,
+    GST_AJA_MODE_RAW_4K_8_50p,
+    GST_AJA_MODE_RAW_4K_8_5994p,
+    GST_AJA_MODE_RAW_4K_8_60p,
+    GST_AJA_MODE_RAW_4K_8_11988p,
+    GST_AJA_MODE_RAW_4K_8_120p,
+    
+    GST_AJA_MODE_RAW_4K_10_2398p,
+    GST_AJA_MODE_RAW_4K_10_24p,
+    GST_AJA_MODE_RAW_4K_10_25p,
+    GST_AJA_MODE_RAW_4K_10_2997p,
+    GST_AJA_MODE_RAW_4K_10_30p,
+    GST_AJA_MODE_RAW_4K_10_4795p,
+    GST_AJA_MODE_RAW_4K_10_48p,
+    GST_AJA_MODE_RAW_4K_10_50p,
+    GST_AJA_MODE_RAW_4K_10_5994p,
+    GST_AJA_MODE_RAW_4K_10_60p,
+    GST_AJA_MODE_RAW_4K_10_11988p,
+    GST_AJA_MODE_RAW_4K_10_120p,
     
     GST_AJA_MODE_RAW_END
     
@@ -120,6 +175,36 @@ typedef enum
 #define GST_TYPE_AJA_MODE_HEVC (gst_aja_mode_get_type_hevc ())
 GType gst_aja_mode_get_type_hevc (void);
 
+typedef enum {
+  GST_AJA_VIDEO_INPUT_MODE_SDI,
+  GST_AJA_VIDEO_INPUT_MODE_HDMI,
+  GST_AJA_VIDEO_INPUT_MODE_ANALOG,
+} GstAjaVideoInputMode;
+
+#define GST_TYPE_AJA_VIDEO_INPUT_MODE (gst_aja_video_input_mode_get_type ())
+GType gst_aja_video_input_mode_get_type (void);
+
+typedef enum {
+  GST_AJA_TIMECODE_MODE_VITC1,
+  GST_AJA_TIMECODE_MODE_VITC2,
+  GST_AJA_TIMECODE_MODE_ANALOG_LTC1,
+  GST_AJA_TIMECODE_MODE_ANALOG_LTC2,
+  GST_AJA_TIMECODE_MODE_ATC_LTC,
+} GstAjaTimecodeMode;
+
+#define GST_TYPE_AJA_TIMECODE_MODE (gst_aja_timecode_mode_get_type ())
+GType gst_aja_timecode_mode_get_type (void);
+
+typedef enum {
+  GST_AJA_AUDIO_INPUT_MODE_EMBEDDED,
+  GST_AJA_AUDIO_INPUT_MODE_HDMI,
+  GST_AJA_AUDIO_INPUT_MODE_AES,
+  GST_AJA_AUDIO_INPUT_MODE_ANALOG,
+} GstAjaAudioInputMode;
+
+#define GST_TYPE_AJA_AUDIO_INPUT_MODE (gst_aja_audio_input_mode_get_type ())
+GType gst_aja_audio_input_mode_get_type (void);
+
 // Used to keep track of engine when shared between audio/hevc/and video
 typedef enum
 {
@@ -158,7 +243,7 @@ GstCaps * gst_aja_mode_get_template_caps_raw (void);
 typedef struct _GstAjaOutput GstAjaOutput;
 struct _GstAjaOutput
 {
-    NTV2GstAVHevc       *ntv2AVHevc;
+    NTV2GstAV       *ntv2AVHevc;
     NTV2EngineState     ntv2EngineState;
     const GstAjaMode    *mode;
     
@@ -180,13 +265,11 @@ struct _GstAjaOutput
 typedef struct _GstAjaInput GstAjaInput;
 struct _GstAjaInput
 {
-    NTV2GstAVHevc       *ntv2AVHevc;
+    NTV2GstAV       *ntv2AVHevc;
     NTV2EngineState     ntv2EngineState;
     const GstAjaMode    *mode;
 
-    GstClock            *clock;
-    GstClockTime        clock_start_time, clock_offset, clock_last_time, clock_epoch;
-    gboolean            started, clock_restart;
+    gboolean            started;
     
     GMutex              lock;
     
@@ -196,6 +279,7 @@ struct _GstAjaInput
     gboolean            video_enabled;
     GstElement          *hevcsrc;
     gboolean            hevc_enabled;
+    void (*start_streams) (GstElement *videosrc);
 };
 
 #define GST_TYPE_AJA_CLOCK \
@@ -218,7 +302,6 @@ struct _GstAjaClock
 {
     GstSystemClock clock;
 
-    GstAjaInput *input;
     GstAjaOutput *output;
 };
 
@@ -228,11 +311,42 @@ struct _GstAjaClockClass
 };
 
 GType gst_aja_clock_get_type (void);
-GstClock *gst_aja_clock_new (const gchar * name);
+
+GstAjaInput *  gst_aja_acquire_input (const gchar * deviceIdentifier, gint channel, GstElement * src, gboolean is_audio, gboolean is_hevc);
 
 
-void    gst_set_aja_clock_and_element (GstElement * element, gboolean is_audio);
-GstAjaInput *  gst_aja_acquire_input (gint deviceNum, gint channel, GstElement * src, gboolean is_audio, gboolean is_hevc);
+#define GST_TYPE_AJA_BUFFER_POOL \
+(gst_aja_buffer_pool_get_type())
+#define GST_AJA_BUFFER_POOL(obj) \
+(G_TYPE_CHECK_INSTANCE_CAST((obj),GST_TYPE_AJA_BUFFER_POOL,GstAjaBufferPool))
+#define GST_AJA_BUFFER_POOL_CLASS(klass) \
+(G_TYPE_CHECK_CLASS_CAST((klass),GST_TYPE_AJA_BUFFER_POOL,GstAjaBufferPoolClass))
+#define GST_IS_Aja_BUFFER_POOL(obj) \
+(G_TYPE_CHECK_INSTANCE_TYPE((obj),GST_TYPE_AJA_BUFFER_POOL))
+#define GST_IS_Aja_BUFFER_POOL_CLASS(klass) \
+(G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_AJA_BUFFER_POOL))
+#define GST_AJA_BUFFER_POOL_CAST(obj) \
+((GstAjaBufferPool*)(obj))
 
+typedef struct _GstAjaBufferPool GstAjaBufferPool;
+typedef struct _GstAjaBufferPoolClass GstAjaBufferPoolClass;
+
+struct _GstAjaBufferPool
+{
+    GstBufferPool buffer_pool;
+
+    gboolean is_video, is_hevc;
+    guint size;
+};
+
+struct _GstAjaBufferPoolClass
+{
+    GstBufferPoolClass parent_class;
+};
+
+GType gst_aja_buffer_pool_get_type (void);
+GstBufferPool * gst_aja_buffer_pool_new (void);
+AjaVideoBuff * gst_aja_buffer_get_video_buff (GstBuffer * buffer);
+AjaAudioBuff * gst_aja_buffer_get_audio_buff (GstBuffer * buffer);
 
 #endif

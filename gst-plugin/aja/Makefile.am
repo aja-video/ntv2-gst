@@ -34,15 +34,18 @@ libgstaja_la_LIBTOOLFLAGS = $(GST_PLUGIN_LIBTOOLFLAGS)
 libgstaja_la_SOURCES = \
 	gstaja.cpp \
 	gstajavideosrc.cpp \
-	gstajahevcsrc.cpp \
 	gstajaaudiosrc.cpp \
-	gstajavideosink.cpp \
-	gstajaaudiosink.cpp \
 	gstntv2.cpp
+#	gstajavideosink.cpp
+#	gstajaaudiosink.cpp
+#	gstajahevcsrc.cpp
 
 # headers we need but don't want installed
 noinst_HEADERS = \
 	gstaja.h \
 	gstajavideosrc.h \
-	gstajahevcsrc.h \
+	gstajaaudiosrc.cpp \
 	gstntv2.h
+#	gstajahevcsrc.h
+#	gstajavideosink.cpp
+#	gstajaaudiosink.cpp

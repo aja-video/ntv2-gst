@@ -1,5 +1,6 @@
 /* GStreamer
  * Copyright (C) 2015 PSM <philm@aja.com>
+ * Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -54,11 +55,35 @@ struct _GstAjaVideoSrc
     GQueue                      current_frames;
 
     guint                       queue_size;
+    gchar *                     device_identifier;
+    GstAjaVideoInputMode        input_mode;
     guint                       input_channel;
-    guint                       device_number;
+    gboolean                    passthrough;
+    gboolean                    output_stream_time;
+    GstClockTime                skip_first_time;
+    GstAjaTimecodeMode          timecode_mode;
+    gboolean                    output_cc;
+    gint			last_cc_vbi_line;
 
-    GstClockTime                internal_base_time;
-    GstClockTime                external_base_time;
+    gboolean have_signal;
+    GstClockTime discont_time;
+    guint64 discont_frame_number;
+
+    GstClockTime first_time;
+    GstClockTime *times;
+    GstClockTime *times_temp;
+    guint window_size, window_fill;
+    gboolean window_filled;
+    guint window_skip, window_skip_count;
+    struct {
+      GstClockTime xbase, b;
+      GstClockTime num, den;
+    } current_time_mapping;
+    struct {
+      GstClockTime xbase, b;
+      GstClockTime num, den;
+    } next_time_mapping;
+    gboolean next_time_mapping_pending;
 };
 
 struct _GstAjaVideoSrcClass
@@ -67,7 +92,6 @@ struct _GstAjaVideoSrcClass
 };
 
 GType gst_aja_video_src_get_type (void);
-void gst_aja_video_src_convert_to_external_clock (GstAjaVideoSrc * self, GstClockTime * timestamp, GstClockTime * duration);
 
 G_END_DECLS
 

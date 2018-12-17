@@ -1,1550 +1,1787 @@
 /**
-	@file		ntv2encodehevc.cpp
-	@brief		Implementation of NTV2EncodeHEVC class.
-	@copyright	Copyright (C) 2015 AJA Video Systems, Inc.  All rights reserved.
+    @file        ntv2encodehevc.cpp
+    @brief        Implementation of NTV2EncodeHEVC class.
+    @copyright    Copyright (C) 2015 AJA Video Systems, Inc.  All rights reserved.
+                  Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
 **/
 
 #include <stdio.h>
 
 #include "gstntv2.h"
+#include "gstaja.h"
 #include "ntv2utils.h"
 #include "ntv2devicefeatures.h"
 #include "ajabase/system/process.h"
 #include "ajabase/system/systemtime.h"
 
-#define NTV2_AUDIOSIZE_MAX		(401 * 1024)
+GST_DEBUG_CATEGORY_STATIC (gst_ntv2_debug);
+#define GST_CAT_DEFAULT gst_ntv2_debug
 
+#define NTV2_AUDIOSIZE_MAX        (401 * 1024)
 
-NTV2GstAVHevc::NTV2GstAVHevc (const string inDeviceSpecifier, const NTV2Channel inChannel)
-
-:	mACInputThread          (NULL),
-	mVideoOutputThread		(NULL),
-	mCodecRawThread			(NULL),
-	mCodecHevcThread		(NULL),
-    mHevcOutputThread 		(NULL),
-    mAudioOutputThread 		(NULL),
-    mM31					(NULL),
-    mLock                   (new AJALock),
-	mDeviceID				(DEVICE_ID_NOTFOUND),
-    mDeviceSpecifier		(inDeviceSpecifier),
-    mInputChannel			(inChannel),
-    mEncodeChannel          (M31_CH0),
-	mInputSource			(NTV2_INPUTSOURCE_SDI1),
-    mVideoFormat			(NTV2_MAX_NUM_VIDEO_FORMATS),
-    mMultiStream			(false),
-	mAudioSystem			(NTV2_AUDIOSYSTEM_1),
-    mNumAudioChannels       (0),
-	mLastFrame				(false),
-	mLastFrameInput			(false),
-	mLastFrameVideoOut      (false),
-	mLastFrameHevc			(false),
-    mLastFrameHevcOut       (false),
-    mLastFrameAudioOut      (false),
-    mGlobalQuit				(false),
-    mStarted                (false),
-    mVideoCallback          (0),
-    mVideoCallbackRefcon    (0),
-    mAudioCallback          (0),
-    mAudioCallbackRefcon    (0),
-	mVideoInputFrameCount	(0),		
-	mVideoOutFrameCount     (0),
-	mCodecRawFrameCount		(0),
-	mCodecHevcFrameCount	(0),
-    mHevcOutFrameCount      (0),
-    mAudioOutFrameCount 	(0)
-
+static void
+_init_ntv2_debug (void)
 {
-    ::memset (mACInputBuffer,       0x0, sizeof (mACInputBuffer));
-    ::memset (mVideoHevcBuffer,     0x0, sizeof (mVideoHevcBuffer));
-    ::memset (mAudioInputBuffer,    0x0, sizeof (mAudioInputBuffer));
+#ifndef GST_DISABLE_GST_DEBUG
+  static volatile gsize _init = 0;
 
-}	//	constructor
+  if (g_once_init_enter (&_init)) {
+    GST_DEBUG_CATEGORY_INIT (gst_ntv2_debug, "ajantv2", 0, "AJA ntv2");
+    g_once_init_leave (&_init, 1);
+  }
+#endif
+}
+
+NTV2GstAV::NTV2GstAV (const string inDeviceSpecifier,
+    const NTV2Channel inChannel)
+
+:
 
 
-NTV2GstAVHevc::~NTV2GstAVHevc ()
+
+mACInputThread (NULL),
+mCodecRawThread (NULL),
+mCodecHevcThread (NULL),
+mM31 (NULL),
+mLock (new AJALock),
+mDeviceID (DEVICE_ID_NOTFOUND),
+mDeviceSpecifier (inDeviceSpecifier),
+mInputChannel (inChannel),
+mEncodeChannel (M31_CH0),
+mInputSource (NTV2_INPUTSOURCE_SDI1),
+mVideoFormat (NTV2_MAX_NUM_VIDEO_FORMATS),
+mMultiStream (false),
+mAudioSystem (NTV2_AUDIOSYSTEM_1),
+mNumAudioChannels (0),
+mLastFrame (false),
+mLastFrameInput (false),
+mLastFrameVideoOut (false),
+mLastFrameHevc (false),
+mLastFrameHevcOut (false),
+mLastFrameAudioOut (false),
+mGlobalQuit (false),
+mStarted (false),
+mVideoCallback (0),
+mVideoCallbackRefcon (0),
+mAudioCallback (0),
+mAudioCallbackRefcon (0),
+mAudioBufferPool (NULL),
+mVideoBufferPool (NULL),
+mVideoInputFrameCount (0),
+mVideoOutFrameCount (0),
+mCodecRawFrameCount (0),
+mCodecHevcFrameCount (0), mHevcOutFrameCount (0), mAudioOutFrameCount (0)
 {
-	//	Stop my capture and consumer threads, then destroy them...
-	Quit ();
+  ::memset (mHevcInputBuffer, 0x0, sizeof (mHevcInputBuffer));
 
-    if (mM31 != NULL)
-	{
-		delete mM31;
-		mM31 = NULL;
-	}
-	
-	// unsubscribe from input vertical event...
-	mDevice.UnsubscribeInputVerticalEvent (mInputChannel);
-    
-    FreeHostBuffers();
-
-    delete mLock;
-    mLock = NULL;
-    
-
-} // destructor
+  _init_ntv2_debug ();
+}                               //    constructor
 
 
-AJAStatus NTV2GstAVHevc::Open (void)
+NTV2GstAV::~NTV2GstAV ()
 {
-    //	Open the device...
-	if (!CNTV2DeviceScanner::GetFirstDeviceFromArgument (mDeviceSpecifier, mDevice))
-    {
-        GST_ERROR ("ERROR: Device not found");
-        return AJA_STATUS_OPEN;
-    }
-    
-	mDevice.SetEveryFrameServices (NTV2_OEM_TASKS);			//	Since this is an OEM app, use the OEM service level
-	mDeviceID = mDevice.GetDeviceID ();						//	Keep the device ID handy, as it's used frequently
+  //    Stop my capture and consumer threads, then destroy them...
+  Quit ();
 
+  if (mM31 != NULL) {
+    delete mM31;
+    mM31 = NULL;
+  }
+  // unsubscribe from input vertical event...
+  mDevice.UnsubscribeInputVerticalEvent (mInputChannel);
+
+  FreeHostBuffers ();
+
+  delete mLock;
+  mLock = NULL;
+
+
+}                               // destructor
+
+
+AJAStatus NTV2GstAV::Open (void)
+{
+  if (mDeviceID != DEVICE_ID_NOTFOUND)
     return AJA_STATUS_SUCCESS;
+
+  //    Open the device...
+  if (!CNTV2DeviceScanner::GetFirstDeviceFromArgument (mDeviceSpecifier,
+          mDevice)) {
+    GST_ERROR ("ERROR: Device not found");
+    return AJA_STATUS_OPEN;
+  }
+
+  mDevice.SetEveryFrameServices (NTV2_OEM_TASKS);       //    Since this is an OEM app, use the OEM service level
+  mDeviceID = mDevice.GetDeviceID ();   //    Keep the device ID handy, as it's used frequently
+
+  // So we can configure each channel separately
+  mDevice.SetMultiFormatMode(true);
+
+  return AJA_STATUS_SUCCESS;
 }
 
 
-AJAStatus NTV2GstAVHevc::Close (void)
+AJAStatus NTV2GstAV::Close (void)
 {
-    AJAStatus	status	(AJA_STATUS_SUCCESS);
+  AJAStatus
+  status (AJA_STATUS_SUCCESS);
 
+  mDeviceID = DEVICE_ID_NOTFOUND;;
+
+  return status;
+}
+
+
+AJAStatus
+    NTV2GstAV::Init (const M31VideoPreset inPreset,
+    const NTV2VideoFormat inVideoFormat,
+    const NTV2InputSource inInputSource,
+    const uint32_t inBitDepth,
+    const bool inIs422,
+    const bool inIsAuto,
+    const bool inHevcOutput,
+    const bool inQuadMode,
+    const NTV2TCIndex inTimeCode,
+    const bool inInfoData,
+    const bool inCaptureTall,
+    const bool inPassthrough)
+{
+  AJAStatus status (AJA_STATUS_SUCCESS);
+
+  mPreset = inPreset;
+  mVideoFormat = inVideoFormat;
+  mVideoSource = inInputSource;
+  mBitDepth = inBitDepth;
+  mIs422 = inIs422;
+  mIsAuto = inIsAuto;
+  mHevcOutput = inHevcOutput;
+  mQuad = inQuadMode;
+  mTimecodeMode = inTimeCode;
+  mWithInfo = inInfoData;
+  mCaptureTall = inCaptureTall;
+  mPassthrough = mPassthrough;
+
+  if (mQuad) {
+    if (mInputChannel != NTV2_CHANNEL1 && mInputChannel != NTV2_CHANNEL5) {
+      GST_ERROR ("Quad mode requires channel 1 or 5");
+      return AJA_STATUS_FAIL;
+    }
+  }
+
+  //  If we are in auto mode then do nothing if we are already running, otherwise force raw, 422, 8 bit.
+  //  This flag shoud only be driven by the audiosrc to either start a non running channel without having
+  //  to know anything about the video or to latch onto an alreay running channel in the event it has been
+  //  started by the videosrc or hevcsrc.
+  if (mIsAuto) {
+    if (mStarted)
+      return AJA_STATUS_SUCCESS;
+
+    //  Get SDI input format
+    status = DetermineInputFormat (mInputChannel, mQuad, mVideoFormat);
+    if (AJA_FAILURE (status))
+      return status;
+
+    mBitDepth = 8;
+    mHevcOutput = false;
+  }
+
+  // Ensure that mCaptureTall is only set for formats that can
+  // actually contain VANC and that we handle
+  switch (mVideoFormat) {
+    case NTV2_FORMAT_720p_2398:
+    case NTV2_FORMAT_720p_2500:
+    case NTV2_FORMAT_720p_5000:
+    case NTV2_FORMAT_720p_5994:
+    case NTV2_FORMAT_720p_6000:
+    case NTV2_FORMAT_1080i_5000:
+    case NTV2_FORMAT_1080i_5994:
+    case NTV2_FORMAT_1080i_6000:
+    case NTV2_FORMAT_1080p_2398:
+    case NTV2_FORMAT_1080p_2400:
+    case NTV2_FORMAT_1080p_2500:
+    case NTV2_FORMAT_1080p_2997:
+    case NTV2_FORMAT_1080p_3000:
+    case NTV2_FORMAT_1080p_5000_A:
+    case NTV2_FORMAT_1080p_5994_A:
+    case NTV2_FORMAT_1080p_6000_A:
+      break;
+    default:
+      mCaptureTall = false;
+      break;
+    }
+
+  //    Setup frame buffer
+  status = SetupVideo ();
+  if (AJA_FAILURE (status)) {
+    GST_ERROR ("Video setup failure");
     return status;
+  }
+
+  //    Setup codec
+  if (mHevcOutput) {
+    status = SetupHEVC ();
+    if (AJA_FAILURE (status)) {
+      GST_ERROR ("Encoder setup failure");
+      return status;
+    }
+  }
+
+  return AJA_STATUS_SUCCESS;
+}
+
+AJAStatus
+NTV2GstAV::InitAudio (const NTV2AudioSource inAudioSource, uint32_t * numAudioChannels)
+{
+  AJAStatus
+  status (AJA_STATUS_SUCCESS);
+
+  mAudioSource = inAudioSource;
+  mNumAudioChannels = *numAudioChannels;
+
+  //    Setup audio buffer
+  status = SetupAudio ();
+  if (AJA_FAILURE (status)) {
+    GST_ERROR ("Audio setup failure");
+    return status;
+  }
+
+  ULWord
+      nchannels = -1;
+  mDevice.GetNumberAudioChannels (nchannels, mAudioSystem);
+  *numAudioChannels = nchannels;
+
+  return status;
+}
+
+void
+NTV2GstAV::Quit (void)
+{
+  if (!mLastFrame && !mGlobalQuit) {
+    //    Set the last frame flag to start the quit process
+    mLastFrame = true;
+
+    //    Wait for the last frame to be written to disk
+    int i;
+    int timeout = 300;
+    for (i = 0; i < timeout; i++) {
+      if (mHevcOutput) {
+        if (mLastFrameHevcOut && mLastFrameAudioOut)
+          break;
+      } else {
+        if (mLastFrameVideoOut && mLastFrameAudioOut)
+          break;
+      }
+      AJATime::Sleep (10);
+    }
+
+    if (i == timeout)
+      GST_ERROR ("ERROR: Wait for last frame timeout");
+
+    if (mM31 && mHevcOutput) {
+      //    Stop the encoder stream
+      if (!mM31->ChangeEHState (Hevc_EhState_ReadyToStop, mEncodeChannel))
+        GST_ERROR ("ERROR: ChangeEHState ready to stop failed");
+
+      if (!mM31->ChangeEHState (Hevc_EhState_Stop, mEncodeChannel))
+        GST_ERROR ("ERROR: ChangeEHState stop failed");
+
+      // stop the video input stream
+      if (!mM31->ChangeVInState (Hevc_VinState_Stop, mEncodeChannel))
+        GST_ERROR ("ERROR: ChangeVInState stop failed");
+
+      if (!mMultiStream) {
+        //    Now go to the init state
+        if (!mM31->ChangeMainState (Hevc_MainState_Init,
+                Hevc_EncodeMode_Single))
+          GST_ERROR ("ERROR: ChangeMainState to init failed");
+      }
+    }
+  }
+  //    Stop the worker threads
+  mGlobalQuit = true;
+  mStarted = false;
+
+  StopACThread ();
+  StopCodecRawThread ();
+  StopCodecHevcThread ();
+  FreeHostBuffers ();
+
+  //  Stop video capture
+  mDevice.SetMode (mInputChannel, NTV2_MODE_DISPLAY, false);
+  if (mQuad) {
+    mDevice.SetMode ((NTV2Channel) (mInputChannel + 1), NTV2_MODE_DISPLAY, false);
+    mDevice.SetMode ((NTV2Channel) (mInputChannel + 2), NTV2_MODE_DISPLAY, false);
+    mDevice.SetMode ((NTV2Channel) (mInputChannel + 3), NTV2_MODE_DISPLAY, false);
+  }
 }
 
 
-AJAStatus NTV2GstAVHevc::Init (const M31VideoPreset         inPreset,
-                               const NTV2VideoFormat        inVideoFormat,
-                               const uint32_t               inBitDepth,
-                               const bool                   inIs422,
-                               const bool                   inIsAuto,
-                               const bool                   inHevcOutput,
-                               const bool                   inQuadMode,
-                               const bool                   inTimeCode,
-                               const bool                   inInfoData)
+AJAStatus NTV2GstAV::SetupHEVC (void)
 {
-    AJAStatus	status	(AJA_STATUS_SUCCESS);
+  HevcMainState
+      mainState;
+  HevcEncodeMode
+      encodeMode;
+  HevcVinState
+      vInState;
+  HevcEhState
+      ehState;
 
-    mPreset			= inPreset;
-    mVideoFormat    = inVideoFormat;
-    mBitDepth       = inBitDepth;
-    mIs422          = inIs422;
-    mIsAuto         = inIsAuto;
-    mHevcOutput     = inHevcOutput;
-    mQuad           = inQuadMode;
-    mWithAnc        = inTimeCode;
-    mWithInfo       = inInfoData;
-    
-    //  If we are in auto mode then do nothing if we are already running, otherwise force raw, 422, 8 bit.
-    //  This flag shoud only be driven by the audiosrc to either start a non running channel without having
-    //  to know anything about the video or to latch onto an alreay running channel in the event it has been
-    //  started by the videosrc or hevcsrc.
-    if (mIsAuto)
-    {
-        if (mStarted)
-            return AJA_STATUS_SUCCESS;
-        
-        //  Get SDI input format
-        status = DetermineInputFormat(mInputChannel, mQuad, mVideoFormat);
-        if (AJA_FAILURE(status))
-            return status;
-        
-        mBitDepth = 8;
-        mHevcOutput = false;
+  // Allocate our M31 helper class
+  mM31 = new CNTV2m31 (&mDevice);
+
+  if (mMultiStream) {
+    mM31->GetMainState (&mainState, &encodeMode);
+    if ((mainState != Hevc_MainState_Encode)
+        || (encodeMode != Hevc_EncodeMode_Multiple)) {
+      // Here we need to start up the M31 so we reset the part then go into the init state
+      if (!mM31->Reset ()) {
+        GST_ERROR ("ERROR: Reset of M31 failed");
+        return AJA_STATUS_INITIALIZE;
+      }
+      // After a reset we should be in the boot state so lets check this
+      mM31->GetMainState (&mainState);
+      if (mainState != Hevc_MainState_Boot) {
+        GST_ERROR ("ERROR: Not in boot state after reset");
+        return AJA_STATUS_INITIALIZE;
+      }
+      // Now go to the init state
+      if (!mM31->ChangeMainState (Hevc_MainState_Init,
+              Hevc_EncodeMode_Multiple)) {
+        GST_ERROR ("ERROR: ChangeMainState to init failed");
+        return AJA_STATUS_INITIALIZE;
+      }
+
+      mM31->GetMainState (&mainState);
+      if (mainState != Hevc_MainState_Init) {
+        GST_ERROR ("ERROR: Not in init state after change");
+        return AJA_STATUS_INITIALIZE;
+      }
+      // Now lets configure the device for a given preset.  First we must clear out all of the params which
+      // is necessary since the param space is basically uninitialized memory.
+      mM31->ClearAllParams ();
+
+      // Load and set common params for all channels
+      if (!mM31->SetupCommonParams (mPreset, M31_CH0)) {
+        GST_ERROR ("ERROR: SetCommonParams failed ch0");
+        return AJA_STATUS_INITIALIZE;
+      }
+      // Change state to encode
+      if (!mM31->ChangeMainState (Hevc_MainState_Encode,
+              Hevc_EncodeMode_Multiple)) {
+        GST_ERROR ("ERROR: ChangeMainState to encode failed");
+        return AJA_STATUS_INITIALIZE;
+      }
+
+      mM31->GetMainState (&mainState);
+      if (mainState != Hevc_MainState_Encode) {
+        GST_ERROR ("ERROR: Not in encode state after change");
+        return AJA_STATUS_INITIALIZE;
+      }
     }
-    
-    // Figure out frame buffer format
-    if (mHevcOutput)
-    {
-        if (mBitDepth == 8)
-        {
-            if (mIs422)
-                mPixelFormat = NTV2_FBF_8BIT_YCBCR_422PL2;
-            else
-                mPixelFormat = NTV2_FBF_8BIT_YCBCR_420PL2;
-        }
-        else
-        {
-            if (mIs422)
-                mPixelFormat = NTV2_FBF_10BIT_YCBCR_422PL2;
-            else
-                mPixelFormat = NTV2_FBF_10BIT_YCBCR_420PL2;
-        }
+    // Write out stream params
+    if (!mM31->SetupVIParams (mPreset, mEncodeChannel)) {
+      GST_ERROR ("ERROR: SetupVIParams failed");
+      return AJA_STATUS_INITIALIZE;
     }
+    if (!mM31->SetupVInParams (mPreset, mEncodeChannel)) {
+      GST_ERROR ("ERROR: SetupVinParams failed");
+      return AJA_STATUS_INITIALIZE;
+    }
+    if (!mM31->SetupVAParams (mPreset, mEncodeChannel)) {
+      GST_ERROR ("ERROR: SetupVAParams failed");
+      return AJA_STATUS_INITIALIZE;
+    }
+    if (!mM31->SetupEHParams (mPreset, mEncodeChannel)) {
+      GST_ERROR ("ERROR: SetupEHParams failed");
+      return AJA_STATUS_INITIALIZE;
+    }
+
+    if (mWithInfo) {
+      // Enable picture information
+      if (!mM31->mpM31VInParam->SetPTSMode (M31_PTSModeHost,
+              (M31VirtualChannel) mEncodeChannel)) {
+        GST_ERROR ("ERROR: SetPTSMode failed");
+        return AJA_STATUS_INITIALIZE;
+      }
+    }
+    // Now that we have setup the M31 lets change the VIn and EH states for channel 0 to start
+    if (!mM31->ChangeVInState (Hevc_VinState_Start, mEncodeChannel)) {
+      GST_ERROR ("ERROR: ChangeVInState failed");
+      return AJA_STATUS_INITIALIZE;
+    }
+
+    mM31->GetVInState (&vInState, mEncodeChannel);
+    if (vInState != Hevc_VinState_Start) {
+      GST_ERROR ("ERROR: VIn didn't start = %d", vInState);
+      return AJA_STATUS_INITIALIZE;
+    }
+
+    if (!mM31->ChangeEHState (Hevc_EhState_Start, mEncodeChannel)) {
+      GST_ERROR ("ERROR: ChangeEHState failed");
+      return AJA_STATUS_INITIALIZE;
+    }
+
+    mM31->GetEHState (&ehState, mEncodeChannel);
+    if (ehState != Hevc_EhState_Start) {
+      GST_ERROR ("ERROR: EH didn't start = %d", ehState);
+      return AJA_STATUS_INITIALIZE;
+    }
+  } else {
+    // if we are in the init state assume that last stop was good
+    // otherwise reset the codec
+    mM31->GetMainState (&mainState, &encodeMode);
+    if ((mainState != Hevc_MainState_Init)
+        || (encodeMode != Hevc_EncodeMode_Single)) {
+      // Here we need to start up the M31 so we reset the part then go into the init state
+      if (!mM31->Reset ()) {
+        GST_ERROR ("ERROR: Reset of M31 failed");
+        return AJA_STATUS_INITIALIZE;
+      }
+      // After a reset we should be in the boot state so lets check this
+      mM31->GetMainState (&mainState);
+      if (mainState != Hevc_MainState_Boot) {
+        GST_ERROR ("ERROR: Not in boot state after reset");
+        return AJA_STATUS_INITIALIZE;
+      }
+      // Now go to the init state
+      if (!mM31->ChangeMainState (Hevc_MainState_Init, Hevc_EncodeMode_Single)) {
+        GST_ERROR ("ERROR: ChangeMainState to init failed");
+        return AJA_STATUS_INITIALIZE;
+      }
+
+      mM31->GetMainState (&mainState);
+      if (mainState != Hevc_MainState_Init) {
+        GST_ERROR ("ERROR: Not in init state after change");
+        return AJA_STATUS_INITIALIZE;
+      }
+    }
+    // Now lets configure the device for a given preset.  First we must clear out all of the params which
+    // is necessary since the param space is basically uninitialized memory.
+    mM31->ClearAllParams ();
+
+    // Now load params for M31 preset into local structures in CNTV2m31
+    if (!mM31->LoadAllParams (mPreset)) {
+      GST_ERROR ("ERROR: LoadAllPresets failed");
+      return AJA_STATUS_INITIALIZE;
+    }
+    // Here is where you can alter params sent to the M31 because all of these structures are public
+
+    // Write out all of the params to each of the 4 physical channels
+    if (!mM31->SetAllParams (M31_CH0)) {
+      GST_ERROR ("ERROR: SetVideoPreset failed ch0");
+      return AJA_STATUS_INITIALIZE;
+    }
+
+    if (!mM31->SetAllParams (M31_CH1)) {
+      GST_ERROR ("ERROR: SetVideoPreset failed ch1");
+      return AJA_STATUS_INITIALIZE;
+    }
+
+    if (!mM31->SetAllParams (M31_CH2)) {
+      GST_ERROR ("ERROR: SetVideoPreset failed ch2");
+      return AJA_STATUS_INITIALIZE;
+    }
+
+    if (!mM31->SetAllParams (M31_CH3)) {
+      GST_ERROR ("ERROR: SetVideoPreset failed ch3");
+      return AJA_STATUS_INITIALIZE;
+    }
+
+    if (mWithInfo) {
+      // Enable picture information
+      if (!mM31->mpM31VInParam->SetPTSMode (M31_PTSModeHost,
+              (M31VirtualChannel) M31_CH0)) {
+        GST_ERROR ("ERROR: SetPTSMode failed");
+        return AJA_STATUS_INITIALIZE;
+      }
+    }
+    // Change state to encode
+    if (!mM31->ChangeMainState (Hevc_MainState_Encode, Hevc_EncodeMode_Single)) {
+      GST_ERROR ("ERROR: ChangeMainState to encode failed");
+      return AJA_STATUS_INITIALIZE;
+    }
+
+    mM31->GetMainState (&mainState);
+    if (mainState != Hevc_MainState_Encode) {
+      GST_ERROR ("ERROR: Not in encode state after change");
+      return AJA_STATUS_INITIALIZE;
+    }
+    // Now that we have setup the M31 lets change the VIn and EH states for channel 0 to start
+    if (!mM31->ChangeVInState (Hevc_VinState_Start, 0x01)) {
+      GST_ERROR ("ERROR: ChangeVInState failed");
+      return AJA_STATUS_INITIALIZE;
+    }
+
+    mM31->GetVInState (&vInState, M31_CH0);
+    if (vInState != Hevc_VinState_Start) {
+      GST_ERROR ("ERROR: VIn didn't start = %d", vInState);
+      return AJA_STATUS_INITIALIZE;
+    }
+
+    if (!mM31->ChangeEHState (Hevc_EhState_Start, 0x01)) {
+      GST_ERROR ("ERROR: ChangeEHState failed");
+      return AJA_STATUS_INITIALIZE;
+    }
+
+    mM31->GetEHState (&ehState, M31_CH0);
+    if (ehState != Hevc_EhState_Start) {
+      GST_ERROR ("ERROR: EH didn't start = %d", ehState);
+      return AJA_STATUS_INITIALIZE;
+    }
+  }
+
+  return AJA_STATUS_SUCCESS;
+}
+
+
+AJAStatus NTV2GstAV::SetupVideo (void)
+{
+  // Figure out frame buffer format
+  if (mHevcOutput) {
+    if (mBitDepth == 8) {
+      if (mIs422)
+        mPixelFormat = NTV2_FBF_8BIT_YCBCR_422PL2;
+      else
+        mPixelFormat = NTV2_FBF_8BIT_YCBCR_420PL2;
+    } else {
+      if (mIs422)
+        mPixelFormat = NTV2_FBF_10BIT_YCBCR_422PL2;
+      else
+        mPixelFormat = NTV2_FBF_10BIT_YCBCR_420PL2;
+    }
+  } else {
+    if (mBitDepth == 8)
+      mPixelFormat = NTV2_FBF_8BIT_YCBCR;
     else
-    {
-        if (mBitDepth == 8)
-            mPixelFormat = NTV2_FBF_8BIT_YCBCR;
-        else
-            mPixelFormat = NTV2_FBF_10BIT_YCBCR;
-    }
+      mPixelFormat = NTV2_FBF_10BIT_YCBCR;
+  }
 
-    //  Quad mode must be channel 1
-    if (mQuad)
-    {
-        mInputChannel = NTV2_CHANNEL1;
-        mOutputChannel = NTV2_CHANNEL5;
-        mEncodeChannel = M31_CH0;
-    }
-    else
-    {
-        //  When input channel specified we are multistream
-        switch (mInputChannel)
-        {
-            case NTV2_CHANNEL1: { mEncodeChannel = M31_CH0; mOutputChannel = NTV2_CHANNEL5; mMultiStream = true; break; }
-            case NTV2_CHANNEL2: { mEncodeChannel = M31_CH1; mOutputChannel = NTV2_CHANNEL6; mMultiStream = true; break; }
-            case NTV2_CHANNEL3: { mEncodeChannel = M31_CH2; mOutputChannel = NTV2_CHANNEL7; mMultiStream = true; break; }
-            case NTV2_CHANNEL4: { mEncodeChannel = M31_CH3; mOutputChannel = NTV2_CHANNEL8; mMultiStream = true; break; }
-            default: { mInputChannel = NTV2_CHANNEL1; mOutputChannel = NTV2_CHANNEL5; mEncodeChannel = M31_CH0; }
-        }
-    }
+  // Enable and subscribe to the interrupts for the channel to be used...
+  mDevice.EnableOutputInterrupt ();
+  mDevice.EnableInputInterrupt (mInputChannel);
+  mDevice.SubscribeInputVerticalEvent (mInputChannel);
 
-    //	Setup frame buffer
-	status = SetupVideo ();
-	if (AJA_FAILURE (status))
-    {
-        GST_ERROR ("Video setup failure");
-		return status;
-    }
+  // Enable input channel
+  mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
+  mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
 
-    //	Route input signals to frame buffers
-	RouteInputSignal ();
-    
-	//	Setup audio buffer
-	status = SetupAudio ();
-	if (AJA_FAILURE (status))
-    {
-        GST_ERROR ("Audio setup failure");
-		return status;
+  mDevice.EnableChannel (mInputChannel);
+
+  //    Setup frame buffer
+  if (mQuad) {
+    //    Set capture mode
+    mDevice.SetMode ((NTV2Channel) (mInputChannel + 1), NTV2_MODE_CAPTURE, false);
+    mDevice.SetMode ((NTV2Channel) (mInputChannel + 2), NTV2_MODE_CAPTURE, false);
+    mDevice.SetMode ((NTV2Channel) (mInputChannel + 3), NTV2_MODE_CAPTURE, false);
+
+    //    Set frame buffer format
+    mDevice.SetFrameBufferFormat ((NTV2Channel) (mInputChannel + 1), mPixelFormat);
+    mDevice.SetFrameBufferFormat ((NTV2Channel) (mInputChannel + 2), mPixelFormat);
+    mDevice.SetFrameBufferFormat ((NTV2Channel) (mInputChannel + 3), mPixelFormat);
+
+    //    Enable frame buffers
+    mDevice.EnableChannel ((NTV2Channel) (mInputChannel + 1));
+    mDevice.EnableChannel ((NTV2Channel) (mInputChannel + 2));
+    mDevice.EnableChannel ((NTV2Channel) (mInputChannel + 3));
+
+    if (::NTV2DeviceHasBiDirectionalSDI (mDeviceID)) {
+      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel), false);
+      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel + 1), false);
+      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel + 2), false);
+      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel + 3), false);
+      mDevice.WaitForOutputVerticalInterrupt ();
+      mDevice.WaitForOutputVerticalInterrupt ();
+      mDevice.WaitForOutputVerticalInterrupt ();
     }
-    
-	//	Setup to capture video/audio/anc input
-    SetupAutoCirculate ();
-    
-	//	Setup codec
-    if (mHevcOutput)
-    {
-        status = SetupHEVC ();
-        if (AJA_FAILURE (status))
-        {
-            GST_ERROR ("Encoder setup failure");
-            return status;
-        }
+  }
+
+  mDevice.SetVideoFormat(mVideoFormat, true, false, mInputChannel);
+
+  mTimeBase.SetAJAFrameRate (GetAJAFrameRate (GetNTV2FrameRateFromVideoFormat
+          (mVideoFormat)));
+
+  // Set up routing
+
+  // Select input channel based on mode
+  NTV2CrosspointID inputIdentifier = NTV2_XptSDIIn1;
+  switch (mVideoSource) {
+    case NTV2_INPUTSOURCE_SDI1:
+      // Select correct values based on channel
+      switch (mInputChannel) {
+         default:
+         case NTV2_CHANNEL1:
+            inputIdentifier = NTV2_XptSDIIn1;
+            mInputSource    = NTV2_INPUTSOURCE_SDI1;
+            break;
+         case NTV2_CHANNEL2:
+            inputIdentifier = NTV2_XptSDIIn2;
+            mInputSource    = NTV2_INPUTSOURCE_SDI2;
+            break;
+         case NTV2_CHANNEL3:
+            inputIdentifier = NTV2_XptSDIIn3;
+            mInputSource    = NTV2_INPUTSOURCE_SDI3;
+            break;
+         case NTV2_CHANNEL4:
+            inputIdentifier = NTV2_XptSDIIn4;
+            mInputSource    = NTV2_INPUTSOURCE_SDI4;
+            break;
+         case NTV2_CHANNEL5:
+            inputIdentifier = NTV2_XptSDIIn5;
+            mInputSource    = NTV2_INPUTSOURCE_SDI5;
+            break;
+         case NTV2_CHANNEL6:
+            inputIdentifier = NTV2_XptSDIIn6;
+            mInputSource    = NTV2_INPUTSOURCE_SDI6;
+            break;
+         case NTV2_CHANNEL7:
+            inputIdentifier = NTV2_XptSDIIn7;
+            mInputSource    = NTV2_INPUTSOURCE_SDI7;
+            break;
+         case NTV2_CHANNEL8:
+            inputIdentifier = NTV2_XptSDIIn8;
+            mInputSource    = NTV2_INPUTSOURCE_SDI8;
+            break;
+      }
+
+      if(!::NTV2BoardCanDoInputSource (mDeviceID, mInputSource))
+        mInputSource = NTV2_INPUTSOURCE_SDI1;
+
+      break;
+    case NTV2_INPUTSOURCE_HDMI1:
+      inputIdentifier = NTV2_XptHDMIIn;
+      mInputSource = NTV2_INPUTSOURCE_HDMI;
+      break;
+    case NTV2_INPUTSOURCE_ANALOG1:
+      inputIdentifier = NTV2_XptAnalogIn;
+      mInputSource = NTV2_INPUTSOURCE_ANALOG;
+      break;
+    default:
+      g_assert_not_reached ();
+      break;
+  }
+
+  NTV2InputCrosspointID fbfInputSelect;
+  CNTV2SignalRouter router;
+
+  // Get corresponding input select entries for the channel
+  switch (mInputChannel) {
+    default:
+    case NTV2_CHANNEL1:
+      mEncodeChannel = M31_CH0;
+      fbfInputSelect = NTV2_XptFrameBuffer1Input;
+      break;
+    case NTV2_CHANNEL2:
+      mEncodeChannel = M31_CH1;
+      fbfInputSelect = NTV2_XptFrameBuffer2Input;
+      break;
+    case NTV2_CHANNEL3:
+      mEncodeChannel = M31_CH2;
+      fbfInputSelect = NTV2_XptFrameBuffer3Input;
+      break;
+    case NTV2_CHANNEL4:
+      mEncodeChannel = M31_CH3;
+      fbfInputSelect = NTV2_XptFrameBuffer4Input;
+      break;
+    case NTV2_CHANNEL5:
+      mEncodeChannel = M31_CH3; //FIXME
+      fbfInputSelect = NTV2_XptFrameBuffer5Input;
+      break;
+    case NTV2_CHANNEL6:
+      mEncodeChannel = M31_CH3; //FIXME
+      fbfInputSelect = NTV2_XptFrameBuffer6Input;
+      break;
+    case NTV2_CHANNEL7:
+      mEncodeChannel = M31_CH3; //FIXME
+      fbfInputSelect = NTV2_XptFrameBuffer7Input;
+      break;
+    case NTV2_CHANNEL8:
+      mEncodeChannel = M31_CH3; //FIXME
+      fbfInputSelect = NTV2_XptFrameBuffer8Input;
+      break;
+  }
+
+  // Add to the mapping to the router for this channel
+  router.AddConnection (fbfInputSelect, inputIdentifier);
+
+  // Disable SDI output from the SDI input being used,
+  // but only if the device supports bi-directional SDI,
+  // and only if the input being used is an SDI input
+  if (::NTV2BoardHasBiDirectionalSDI (mDeviceID)) {
+    mDevice.SetSDITransmitEnable(mInputChannel, false);
+  } else {
+    if (mInputSource == NTV2_INPUTSOURCE_HDMI) {
+      // Enable HDMI passthrough
+      router.AddConnection(NTV2_XptHDMIOutInput, NTV2_XptHDMIIn);
+    } else {
+      // enable SDI End to End mode for all AJA cards that don't support bidirectional SDI
+
+      if (mInputChannel == NTV2_CHANNEL1) {
+        router.AddConnection (NTV2_XptSDIOut1Input, NTV2_XptSDIIn1);
+      } else if (mInputChannel == NTV2_CHANNEL2) {
+        router.AddConnection (NTV2_XptSDIOut2Input, NTV2_XptSDIIn2);
+      } else if (mInputChannel == NTV2_CHANNEL3) {
+        router.AddConnection (NTV2_XptSDIOut3Input, NTV2_XptSDIIn3);
+      } else if (mInputChannel == NTV2_CHANNEL4) {
+        router.AddConnection (NTV2_XptSDIOut4Input, NTV2_XptSDIIn4);
+      }
     }
-    
-	//	Setup the circular buffers
-	SetupHostBuffers ();
-    
-    return AJA_STATUS_SUCCESS;
+  }
+
+  // Enable UHD/4k quad mode
+  if (mQuad) {
+    if (mInputChannel == NTV2_CHANNEL1) {
+      router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
+      router.AddConnection(NTV2_XptFrameBuffer3Input, NTV2_XptSDIIn3);
+      router.AddConnection(NTV2_XptFrameBuffer4Input, NTV2_XptSDIIn4);
+    } else {
+      router.AddConnection(NTV2_XptFrameBuffer6Input, NTV2_XptSDIIn6);
+      router.AddConnection(NTV2_XptFrameBuffer7Input, NTV2_XptSDIIn7);
+      router.AddConnection(NTV2_XptFrameBuffer8Input, NTV2_XptSDIIn8);
+    }
+    mOutputChannel = NTV2_CHANNEL5;
+    mEncodeChannel = M31_CH0;
+  }
+
+  // Enable passthrough on bidirectional devices
+  if (mPassthrough && ::NTV2DeviceHasBiDirectionalSDI(mDeviceID)) {
+    int numVideoInputs = NTV2DeviceGetNumVideoOutputs (mDeviceID);
+
+    mDevice.SetMode((NTV2Channel)(mInputChannel + numVideoInputs / 2), NTV2_MODE_DISPLAY);
+    // Enable End to End mode for all AJA cards that don't support bidirectional SDI
+    if (mInputChannel == NTV2_CHANNEL1) {
+      router.AddConnection ((numVideoInputs == 8) ? NTV2_XptSDIOut5Input : NTV2_XptSDIOut3Input, NTV2_XptSDIIn1);
+      mDevice.SetSDITransmitEnable ((numVideoInputs == 8) ? NTV2_CHANNEL5 : NTV2_CHANNEL3, true);
+    } else if (mInputChannel == NTV2_CHANNEL2) {
+      router.AddConnection ((numVideoInputs == 8) ? NTV2_XptSDIOut6Input : NTV2_XptSDIOut4Input, NTV2_XptSDIIn2);
+      mDevice.SetSDITransmitEnable ((numVideoInputs == 8) ? NTV2_CHANNEL6 : NTV2_CHANNEL4 , true);
+    } else if (mInputChannel == NTV2_CHANNEL3) {
+      router.AddConnection ((numVideoInputs == 8) ? NTV2_XptSDIOut7Input : NTV2_XptSDIOut5Input, NTV2_XptSDIIn3);
+      mDevice.SetSDITransmitEnable ((numVideoInputs == 8) ? NTV2_CHANNEL7 : NTV2_CHANNEL5 , true);
+    } else if (mInputChannel == NTV2_CHANNEL4) {
+      router.AddConnection ((numVideoInputs == 8) ? NTV2_XptSDIOut8Input : NTV2_XptSDIOut6Input, NTV2_XptSDIIn4);
+      mDevice.SetSDITransmitEnable ((numVideoInputs == 8) ? NTV2_CHANNEL8 : NTV2_CHANNEL6 , true);
+    }
+  }
+
+  // VANC handling
+  if (mCaptureTall) {
+    GST_DEBUG ("Asking to enable VANC Data");
+    mDevice.SetEnableVANCData (true, false, mInputChannel);
+    if (mPixelFormat == NTV2_FBF_8BIT_YCBCR) {
+      GST_DEBUG ("8bit, asking to shift VANC");
+      if (!mDevice.SetVANCShiftMode (mInputChannel,
+              NTV2_VANCDATA_8BITSHIFT_ENABLE))
+        GST_WARNING ("Failed to request 8bit VANC shift");
+    }
+  }
+
+  // Enable routes
+  mDevice.ApplySignalRoute (router, false);
+
+  //    Set the device reference to the input...
+  //    FIXME
+//  if (mMultiStream) {
+//    mDevice.SetReference (NTV2_REFERENCE_FREERUN);
+//  } else {
+    mDevice.SetReference (::NTV2InputSourceToReferenceSource (mInputSource));
+//  }
+
+#if 0
+  //    When input is 3Gb convert to 3Ga for capture (no RGB support?)
+  bool is3Gb = false;
+  mDevice.GetSDIInput3GbPresent (is3Gb, mInputChannel);
+
+  if (mQuad) {
+    mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL1, is3Gb);
+    mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL2, is3Gb);
+    mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL3, is3Gb);
+    mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL4, is3Gb);
+    mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL5, false);
+    mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL6, false);
+    mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL7, false);
+    mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL8, false);
+  } else {
+    mDevice.SetSDIInLevelBtoLevelAConversion (mInputChannel, is3Gb);
+    mDevice.SetSDIOutLevelAtoLevelBConversion (mOutputChannel, false);
+  }
+
+  if (!mMultiStream)            //    If not doing multistream...
+    mDevice.ClearRouting ();    //    ...replace existing routing
+
+  //    Connect SDI output spigots to FB outputs...
+  mDevice.Connect (NTV2_XptSDIOut5Input, NTV2_XptFrameBuffer5YUV);
+  mDevice.Connect (NTV2_XptSDIOut6Input, NTV2_XptFrameBuffer6YUV);
+  mDevice.Connect (NTV2_XptSDIOut7Input, NTV2_XptFrameBuffer7YUV);
+  mDevice.Connect (NTV2_XptSDIOut8Input, NTV2_XptFrameBuffer8YUV);
+#endif
+
+  //    Give the device some time to lock to the input signal...
+  mDevice.WaitForOutputVerticalInterrupt (mInputChannel, 8);
+
+
+  return AJA_STATUS_SUCCESS;
+}                               //    SetupAudio
+
+
+AJAStatus NTV2GstAV::SetupAudio (void)
+{
+  // Select audio system to use based on the channel
+  switch (mInputChannel) {
+    default:
+    case NTV2_CHANNEL1:
+      mAudioSystem = NTV2_AUDIOSYSTEM_1;
+      break;
+    case NTV2_CHANNEL2:
+      mAudioSystem = NTV2_AUDIOSYSTEM_2;
+      break;
+    case NTV2_CHANNEL3:
+      mAudioSystem = NTV2_AUDIOSYSTEM_3;
+      break;
+    case NTV2_CHANNEL4:
+      mAudioSystem = NTV2_AUDIOSYSTEM_4;
+      break;
+    case NTV2_CHANNEL5:
+      mAudioSystem = NTV2_AUDIOSYSTEM_5;
+      break;
+    case NTV2_CHANNEL6:
+      mAudioSystem = NTV2_AUDIOSYSTEM_6;
+      break;
+    case NTV2_CHANNEL7:
+      mAudioSystem = NTV2_AUDIOSYSTEM_7;
+      break;
+    case NTV2_CHANNEL8:
+      mAudioSystem = NTV2_AUDIOSYSTEM_8;
+      break;
+  }
+
+  // Then based on channel and/or mode, select the audio input
+  switch (mAudioSource) {
+    case NTV2_AUDIO_EMBEDDED:
+      switch (mInputChannel) {
+        default:
+        case NTV2_CHANNEL1:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1, mAudioSystem);
+          break;
+        case NTV2_CHANNEL2:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_2);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_2, mAudioSystem);
+          break;
+        case NTV2_CHANNEL3:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_3);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_3, mAudioSystem);
+          break;
+        case NTV2_CHANNEL4:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_4);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_4, mAudioSystem);
+          break;
+        case NTV2_CHANNEL5:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_5);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_5, mAudioSystem);
+          break;
+        case NTV2_CHANNEL6:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_6);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_6, mAudioSystem);
+          break;
+        case NTV2_CHANNEL7:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_7);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_7, mAudioSystem);
+          break;
+        case NTV2_CHANNEL8:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_8);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_8, mAudioSystem);
+          break;
+      }
+
+      break;
+    case NTV2_AUDIO_HDMI:
+      mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_HDMI, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1);
+      break;
+    case NTV2_AUDIO_AES:
+      mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_AES, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1);
+      break;
+    case NTV2_AUDIO_ANALOG:
+      mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_ANALOG, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1);
+      break;
+    default:
+      g_assert_not_reached ();
+      break;
+  }
+
+  if (mNumAudioChannels == 0)
+    mNumAudioChannels =::NTV2DeviceGetMaxAudioChannels (mDeviceID);
+  if (mNumAudioChannels >::NTV2DeviceGetMaxAudioChannels (mDeviceID))
+    return AJA_STATUS_FAIL;
+
+  // Setting channels or getting the maximum number of channels generally fails and we always
+  // get all channels available to the card
+  mDevice.SetNumberAudioChannels (mNumAudioChannels, mAudioSystem);
+  mDevice.SetAudioRate (NTV2_AUDIO_48K, mAudioSystem);
+  mDevice.SetEmbeddedAudioClock (NTV2_EMBEDDED_AUDIO_CLOCK_VIDEO_INPUT,
+      mAudioSystem);
+
+  //    The on-device audio buffer should be 4MB to work best across all devices & platforms...
+  mDevice.SetAudioBufferSize (NTV2_AUDIO_BUFFER_BIG, mAudioSystem);
+
+  mDevice.SetAudioLoopBack(NTV2_AUDIO_LOOPBACK_OFF, mAudioSystem);
+
+  return AJA_STATUS_SUCCESS;
+
+}                               //    SetupAudio
+
+
+void
+NTV2GstAV::SetupHostBuffers (void)
+{
+  mVideoBufferSize =
+      GetVideoActiveSize (mVideoFormat, mPixelFormat,
+      mCaptureTall ? NTV2_VANCMODE_TALL : NTV2_VANCMODE_OFF);
+  mPicInfoBufferSize = sizeof (HevcPictureInfo) * 2;
+  mEncInfoBufferSize = sizeof (HevcEncodedInfo) * 2;
+  mAudioBufferSize = NTV2_AUDIOSIZE_MAX;
+
+  if (mHevcOutput) {
+    mHevcInputCircularBuffer.SetAbortFlag (&mGlobalQuit);
+    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++) {
+      memset (&mHevcInputBuffer[bufferNdx], 0, sizeof (AjaVideoBuff));
+      mHevcInputBuffer[bufferNdx].pVideoBuffer =
+          new uint32_t[mVideoBufferSize / 4];
+      mHevcInputBuffer[bufferNdx].videoBufferSize = mVideoBufferSize;
+      mHevcInputBuffer[bufferNdx].videoDataSize = 0;
+      mHevcInputBuffer[bufferNdx].pInfoBuffer =
+          new uint32_t[mPicInfoBufferSize / 4];
+      mHevcInputBuffer[bufferNdx].infoBufferSize = mPicInfoBufferSize;
+      mHevcInputBuffer[bufferNdx].infoDataSize = 0;
+      mHevcInputCircularBuffer.Add (&mHevcInputBuffer[bufferNdx]);
+    }
+  }
+  // These video buffers are actually passed out of this class so we need to assign them unique numbers
+  // so they can be tracked and also they have a state
+  mVideoBufferPool = gst_aja_buffer_pool_new ();
+  GstStructure *config = gst_buffer_pool_get_config (mVideoBufferPool);
+  gst_buffer_pool_config_set_params (config, NULL, mVideoBufferSize,
+      VIDEO_ARRAY_SIZE, 0);
+  gst_structure_set (config, "is-video", G_TYPE_BOOLEAN, TRUE, "is-hevc",
+      G_TYPE_BOOLEAN, mHevcOutput, NULL);
+  gst_buffer_pool_set_config (mVideoBufferPool, config);
+  gst_buffer_pool_set_active (mVideoBufferPool, TRUE);
+
+  mAudioBufferPool = gst_aja_buffer_pool_new ();
+  config = gst_buffer_pool_get_config (mAudioBufferPool);
+  gst_buffer_pool_config_set_params (config, NULL, mAudioBufferSize,
+      AUDIO_ARRAY_SIZE, 0);
+  gst_structure_set (config, "is-video", G_TYPE_BOOLEAN, FALSE, "is-hevc",
+      G_TYPE_BOOLEAN, FALSE, NULL);
+  gst_buffer_pool_set_config (mAudioBufferPool, config);
+  gst_buffer_pool_set_active (mAudioBufferPool, TRUE);
+
+}                               //    SetupHostBuffers
+
+
+void
+NTV2GstAV::FreeHostBuffers (void)
+{
+  if (mHevcOutput) {
+    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++) {
+      if (mHevcInputBuffer[bufferNdx].pVideoBuffer) {
+        delete[]mHevcInputBuffer[bufferNdx].pVideoBuffer;
+        mHevcInputBuffer[bufferNdx].pVideoBuffer = NULL;
+      }
+      if (mHevcInputBuffer[bufferNdx].pInfoBuffer) {
+        delete[]mHevcInputBuffer[bufferNdx].pInfoBuffer;
+        mHevcInputBuffer[bufferNdx].pInfoBuffer = NULL;
+      }
+    }
+    mHevcInputCircularBuffer.Clear ();
+  }
+
+  if (mVideoBufferPool) {
+    gst_buffer_pool_set_active (mVideoBufferPool, FALSE);
+    gst_object_unref (mVideoBufferPool);
+    mVideoBufferPool = NULL;
+  }
+
+  if (mAudioBufferPool) {
+    gst_buffer_pool_set_active (mAudioBufferPool, FALSE);
+    gst_object_unref (mAudioBufferPool);
+    mAudioBufferPool = NULL;
+  }
+}
+
+void
+NTV2GstAV::SetupAutoCirculate (void)
+{
+  //    Tell capture AutoCirculate to use 8 frame buffers on the device...
+  mInputTransferStruct.Clear ();
+  mInputTransferStruct.acFrameBufferFormat = mPixelFormat;
+
+  int frameStart, frameEnd;
+
+  // FIXME: This works around a bug in the SDK. In theory by
+  // setting the number of frames to circulate only it should
+  // figure out correct start/end frame indices, but this causes
+  // corrupted output.
+  //
+  // Let's assume at least 6 frames per channel here and calculate
+  // our own indices
+  switch (mInputChannel) {
+    case NTV2_CHANNEL1:
+      frameStart = 0;
+      break;
+    case NTV2_CHANNEL2:
+      frameStart = 7;
+      break;
+    case NTV2_CHANNEL3:
+      frameStart = 14;
+      break;
+    case NTV2_CHANNEL4:
+      frameStart = 21;
+      break;
+    case NTV2_CHANNEL5:
+      frameStart = 28;
+      break;
+    case NTV2_CHANNEL6:
+      frameStart = 35;
+      break;
+    case NTV2_CHANNEL7:
+      frameStart = 42;
+      break;
+    case NTV2_CHANNEL8:
+      frameStart = 49;
+      break;
+    default:
+      g_assert_not_reached ();
+      break;
+  }
+
+  frameEnd = frameStart + 6;
+
+  mDevice.AutoCirculateStop (mInputChannel);
+  mDevice.AutoCirculateInitForInput (mInputChannel, 0,  //    Frames to circulate
+      mAudioSystem,             //    Which audio system
+      AUTOCIRCULATE_WITH_RP188, //    With RP188?
+      1,                        //    1 channel
+      frameStart,
+      frameEnd);
 }
 
 
-void NTV2GstAVHevc::Quit (void)
+AJAStatus NTV2GstAV::Run ()
 {
-    if (!mLastFrame && !mGlobalQuit)
-	{
-		//	Set the last frame flag to start the quit process
-		mLastFrame = true;
-
-		//	Wait for the last frame to be written to disk
-		int i;
-		int timeout = 300;
-		for (i = 0; i < timeout; i++)
-		{
-            if (mHevcOutput)
-            {
-                if (mLastFrameHevcOut && mLastFrameAudioOut) break;
-            }
-            else
-            {
-                if (mLastFrameVideoOut && mLastFrameAudioOut) break;
-            }
-			AJATime::Sleep (10);
-		}
-
-		if (i == timeout)
-            GST_ERROR ("ERROR: Wait for last frame timeout");
-
-        if (mM31 && mHevcOutput)
-        {
-            //	Stop the encoder stream
-            if (!mM31->ChangeEHState(Hevc_EhState_ReadyToStop, mEncodeChannel))
-                GST_ERROR ("ERROR: ChangeEHState ready to stop failed");
-
-            if (!mM31->ChangeEHState(Hevc_EhState_Stop, mEncodeChannel))
-                GST_ERROR ("ERROR: ChangeEHState stop failed");
-
-            // stop the video input stream
-            if (!mM31->ChangeVInState(Hevc_VinState_Stop, mEncodeChannel))
-                GST_ERROR ("ERROR: ChangeVInState stop failed");
-
-            if(!mMultiStream)
-            {
-                //	Now go to the init state
-                if (!mM31->ChangeMainState(Hevc_MainState_Init, Hevc_EncodeMode_Single))
-                    GST_ERROR ("ERROR: ChangeMainState to init failed");
-            }
-        }
-	}
-
-	//	Stop the worker threads
-	mGlobalQuit = true;
-    mStarted = false;
-
-    StopACThread();
-    StopVideoOutputThread();
-    StopCodecRawThread();
-    StopCodecHevcThread();
-    StopAudioOutputThread();
-
-    //  Stop video capture
-    mDevice.SetMode(mInputChannel, NTV2_MODE_DISPLAY, false);
-}
-
-
-AJAStatus NTV2GstAVHevc::SetupHEVC (void)
-{
-    HevcMainState   mainState;
-    HevcEncodeMode  encodeMode;
-    HevcVinState    vInState;
-    HevcEhState     ehState;
-
-    // Allocate our M31 helper class
-    mM31 = new CNTV2m31 (&mDevice);
-
-    if (mMultiStream)
-    {
-        mM31->GetMainState(&mainState, &encodeMode);
-        if ((mainState != Hevc_MainState_Encode) || (encodeMode != Hevc_EncodeMode_Multiple))
-        {
-            // Here we need to start up the M31 so we reset the part then go into the init state
-            if (!mM31->Reset())
-                { GST_ERROR ("ERROR: Reset of M31 failed"); return AJA_STATUS_INITIALIZE; }
-
-            // After a reset we should be in the boot state so lets check this
-            mM31->GetMainState(&mainState);
-            if (mainState != Hevc_MainState_Boot)
-                { GST_ERROR ("ERROR: Not in boot state after reset"); return AJA_STATUS_INITIALIZE; }
-
-            // Now go to the init state
-            if (!mM31->ChangeMainState(Hevc_MainState_Init, Hevc_EncodeMode_Multiple))
-                { GST_ERROR ("ERROR: ChangeMainState to init failed"); return AJA_STATUS_INITIALIZE; }
-
-            mM31->GetMainState(&mainState);
-            if (mainState != Hevc_MainState_Init)
-                { GST_ERROR ("ERROR: Not in init state after change"); return AJA_STATUS_INITIALIZE; }
-
-            // Now lets configure the device for a given preset.  First we must clear out all of the params which
-            // is necessary since the param space is basically uninitialized memory.
-            mM31->ClearAllParams();
-
-            // Load and set common params for all channels
-            if (!mM31->SetupCommonParams(mPreset, M31_CH0))
-                { GST_ERROR ("ERROR: SetCommonParams failed ch0"); return AJA_STATUS_INITIALIZE; }
-
-            // Change state to encode
-            if (!mM31->ChangeMainState(Hevc_MainState_Encode, Hevc_EncodeMode_Multiple))
-                { GST_ERROR ("ERROR: ChangeMainState to encode failed"); return AJA_STATUS_INITIALIZE; }
-
-            mM31->GetMainState(&mainState);
-            if (mainState != Hevc_MainState_Encode)
-                { GST_ERROR ("ERROR: Not in encode state after change"); return AJA_STATUS_INITIALIZE; }
-        }
-
-        // Write out stream params
-        if (!mM31->SetupVIParams(mPreset, mEncodeChannel))
-            { GST_ERROR ("ERROR: SetupVIParams failed"); return AJA_STATUS_INITIALIZE; }
-        if (!mM31->SetupVInParams(mPreset, mEncodeChannel))
-            { GST_ERROR ("ERROR: SetupVinParams failed"); return AJA_STATUS_INITIALIZE; }
-        if (!mM31->SetupVAParams(mPreset, mEncodeChannel))
-            { GST_ERROR ("ERROR: SetupVAParams failed"); return AJA_STATUS_INITIALIZE; }
-        if (!mM31->SetupEHParams(mPreset, mEncodeChannel))
-            { GST_ERROR ("ERROR: SetupEHParams failed"); return AJA_STATUS_INITIALIZE; }
-
-        if (mWithInfo)
-        {
-            // Enable picture information
-            if (!mM31->mpM31VInParam->SetPTSMode(M31_PTSModeHost, (M31VirtualChannel)mEncodeChannel))
-            { GST_ERROR ("ERROR: SetPTSMode failed"); return AJA_STATUS_INITIALIZE; }
-        }
-
-        // Now that we have setup the M31 lets change the VIn and EH states for channel 0 to start
-        if (!mM31->ChangeVInState(Hevc_VinState_Start, mEncodeChannel))
-            { GST_ERROR ("ERROR: ChangeVInState failed"); return AJA_STATUS_INITIALIZE; }
-
-        mM31->GetVInState(&vInState, mEncodeChannel);
-        if (vInState != Hevc_VinState_Start)
-        { GST_ERROR ("ERROR: VIn didn't start = %d", vInState); return AJA_STATUS_INITIALIZE; }
-
-        if (!mM31->ChangeEHState(Hevc_EhState_Start, mEncodeChannel))
-            { GST_ERROR ("ERROR: ChangeEHState failed"); return AJA_STATUS_INITIALIZE; }
-
-        mM31->GetEHState(&ehState, mEncodeChannel);
-        if (ehState != Hevc_EhState_Start)
-        { GST_ERROR ("ERROR: EH didn't start = %d", ehState); return AJA_STATUS_INITIALIZE; }
-    }
-    else
-    {
-        // if we are in the init state assume that last stop was good
-        // otherwise reset the codec
-        mM31->GetMainState(&mainState, &encodeMode);
-        if ((mainState != Hevc_MainState_Init) || (encodeMode != Hevc_EncodeMode_Single))
-        {
-            // Here we need to start up the M31 so we reset the part then go into the init state
-            if (!mM31->Reset())
-                { GST_ERROR ("ERROR: Reset of M31 failed"); return AJA_STATUS_INITIALIZE; }
-
-            // After a reset we should be in the boot state so lets check this
-            mM31->GetMainState(&mainState);
-            if (mainState != Hevc_MainState_Boot)
-                { GST_ERROR ("ERROR: Not in boot state after reset"); return AJA_STATUS_INITIALIZE; }
-
-            // Now go to the init state
-            if (!mM31->ChangeMainState(Hevc_MainState_Init, Hevc_EncodeMode_Single))
-                { GST_ERROR ("ERROR: ChangeMainState to init failed"); return AJA_STATUS_INITIALIZE; }
-
-            mM31->GetMainState(&mainState);
-            if (mainState != Hevc_MainState_Init)
-                { GST_ERROR ("ERROR: Not in init state after change"); return AJA_STATUS_INITIALIZE; }
-        }
-
-        // Now lets configure the device for a given preset.  First we must clear out all of the params which
-        // is necessary since the param space is basically uninitialized memory.
-        mM31->ClearAllParams();
-
-        // Now load params for M31 preset into local structures in CNTV2m31
-        if (!mM31->LoadAllParams(mPreset))
-            { GST_ERROR ("ERROR: LoadAllPresets failed"); return AJA_STATUS_INITIALIZE; }
-
-        // Here is where you can alter params sent to the M31 because all of these structures are public
-
-        // Write out all of the params to each of the 4 physical channels
-        if (!mM31->SetAllParams(M31_CH0))
-            { GST_ERROR ("ERROR: SetVideoPreset failed ch0"); return AJA_STATUS_INITIALIZE; }
-
-        if (!mM31->SetAllParams(M31_CH1))
-            { GST_ERROR ("ERROR: SetVideoPreset failed ch1"); return AJA_STATUS_INITIALIZE; }
-
-        if (!mM31->SetAllParams(M31_CH2))
-            { GST_ERROR ("ERROR: SetVideoPreset failed ch2"); return AJA_STATUS_INITIALIZE; }
-
-        if (!mM31->SetAllParams(M31_CH3))
-            { GST_ERROR ("ERROR: SetVideoPreset failed ch3"); return AJA_STATUS_INITIALIZE; }
-
-        if (mWithInfo)
-        {
-            // Enable picture information
-            if (!mM31->mpM31VInParam->SetPTSMode(M31_PTSModeHost, (M31VirtualChannel)M31_CH0))
-            { GST_ERROR ("ERROR: SetPTSMode failed"); return AJA_STATUS_INITIALIZE; }
-        }
-
-        // Change state to encode
-        if (!mM31->ChangeMainState(Hevc_MainState_Encode, Hevc_EncodeMode_Single))
-            { GST_ERROR ("ERROR: ChangeMainState to encode failed"); return AJA_STATUS_INITIALIZE; }
-
-        mM31->GetMainState(&mainState);
-        if (mainState != Hevc_MainState_Encode)
-            { GST_ERROR ("ERROR: Not in encode state after change"); return AJA_STATUS_INITIALIZE; }
-
-        // Now that we have setup the M31 lets change the VIn and EH states for channel 0 to start
-        if (!mM31->ChangeVInState(Hevc_VinState_Start, 0x01))
-            { GST_ERROR ("ERROR: ChangeVInState failed"); return AJA_STATUS_INITIALIZE; }
-
-        mM31->GetVInState(&vInState, M31_CH0);
-        if (vInState != Hevc_VinState_Start)
-            { GST_ERROR ("ERROR: VIn didn't start = %d", vInState); return AJA_STATUS_INITIALIZE; }
-
-        if (!mM31->ChangeEHState(Hevc_EhState_Start, 0x01))
-            { GST_ERROR ("ERROR: ChangeEHState failed"); return AJA_STATUS_INITIALIZE; }
-
-        mM31->GetEHState(&ehState, M31_CH0);
-        if (ehState != Hevc_EhState_Start)
-            { GST_ERROR ("ERROR: EH didn't start = %d", ehState); return AJA_STATUS_INITIALIZE; }
-    }
-
-	return AJA_STATUS_SUCCESS;
-}
-    
-    
-AJAStatus NTV2GstAVHevc::SetupVideo (void)
-{
-	//	Setup frame buffer
-	if (mQuad)
-	{
-		if (mInputChannel != NTV2_CHANNEL1)
-			return AJA_STATUS_FAIL;
-
-		//	Disable multiformat
-		if (::NTV2DeviceCanDoMultiFormat (mDeviceID))
-			mDevice.SetMultiFormatMode (false);
-
-		//	Set the board video format
-		mDevice.SetVideoFormat (mVideoFormat, false, false, NTV2_CHANNEL1);
-
-		//	Set frame buffer format
-		mDevice.SetFrameBufferFormat (NTV2_CHANNEL1, mPixelFormat);
-		mDevice.SetFrameBufferFormat (NTV2_CHANNEL2, mPixelFormat);
-		mDevice.SetFrameBufferFormat (NTV2_CHANNEL3, mPixelFormat);
-		mDevice.SetFrameBufferFormat (NTV2_CHANNEL4, mPixelFormat);
-        mDevice.SetFrameBufferFormat (NTV2_CHANNEL5, mPixelFormat);
-        mDevice.SetFrameBufferFormat (NTV2_CHANNEL6, mPixelFormat);
-        mDevice.SetFrameBufferFormat (NTV2_CHANNEL7, mPixelFormat);
-        mDevice.SetFrameBufferFormat (NTV2_CHANNEL8, mPixelFormat);
-
-		//	Set catpure mode
-		mDevice.SetMode (NTV2_CHANNEL1, NTV2_MODE_CAPTURE, false);
-		mDevice.SetMode (NTV2_CHANNEL2, NTV2_MODE_CAPTURE, false);
-		mDevice.SetMode (NTV2_CHANNEL3, NTV2_MODE_CAPTURE, false);
-		mDevice.SetMode (NTV2_CHANNEL4, NTV2_MODE_CAPTURE, false);
-        mDevice.SetMode (NTV2_CHANNEL5, NTV2_MODE_DISPLAY, false);
-        mDevice.SetMode (NTV2_CHANNEL6, NTV2_MODE_DISPLAY, false);
-        mDevice.SetMode (NTV2_CHANNEL7, NTV2_MODE_DISPLAY, false);
-        mDevice.SetMode (NTV2_CHANNEL8, NTV2_MODE_DISPLAY, false);
-
-		//	Enable frame buffers
-		mDevice.EnableChannel (NTV2_CHANNEL1);
-		mDevice.EnableChannel (NTV2_CHANNEL2);
-		mDevice.EnableChannel (NTV2_CHANNEL3);
-		mDevice.EnableChannel (NTV2_CHANNEL4);
-        mDevice.EnableChannel (NTV2_CHANNEL5);
-        mDevice.EnableChannel (NTV2_CHANNEL6);
-        mDevice.EnableChannel (NTV2_CHANNEL7);
-        mDevice.EnableChannel (NTV2_CHANNEL8);
-
-		//	Save input source
-		mInputSource = ::NTV2ChannelToInputSource (NTV2_CHANNEL1);
-	}
-    else if (mMultiStream)
-	{
-		//	Configure for multiformat
-		if (::NTV2DeviceCanDoMultiFormat (mDeviceID))
-			mDevice.SetMultiFormatMode (true);
-
-		//	Set the channel video format
-		mDevice.SetVideoFormat (mVideoFormat, false, false, mInputChannel);
-        mDevice.SetVideoFormat (mVideoFormat, false, false, mOutputChannel);
-
-		//	Set frame buffer format
-		mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
-        mDevice.SetFrameBufferFormat (mOutputChannel, mPixelFormat);
-
-		//	Set catpure mode
-		mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
-        mDevice.SetMode (mOutputChannel, NTV2_MODE_DISPLAY, false);
-
-		//	Enable frame buffer
-		mDevice.EnableChannel (mInputChannel);
-        mDevice.EnableChannel (mOutputChannel);
-
-		//	Save input source
-		mInputSource = ::NTV2ChannelToInputSource (mInputChannel);
-	}
-	else
-	{
-		//	Disable multiformat mode
-		if (::NTV2DeviceCanDoMultiFormat (mDeviceID))
-			mDevice.SetMultiFormatMode (false);
-
-		//	Set the board format
-        mDevice.SetVideoFormat (mVideoFormat, false, false, NTV2_CHANNEL1);
-        mDevice.SetVideoFormat (mVideoFormat, false, false, NTV2_CHANNEL5);
-
-		//	Set frame buffer format
-		mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
-        mDevice.SetFrameBufferFormat (mOutputChannel, mPixelFormat);
-
-		//	Set display mode
-		mDevice.SetMode (NTV2_CHANNEL1, NTV2_MODE_DISPLAY, false);
-		mDevice.SetMode (NTV2_CHANNEL2, NTV2_MODE_DISPLAY, false);
-		mDevice.SetMode (NTV2_CHANNEL3, NTV2_MODE_DISPLAY, false);
-		mDevice.SetMode (NTV2_CHANNEL4, NTV2_MODE_DISPLAY, false);
-        mDevice.SetMode (NTV2_CHANNEL5, NTV2_MODE_DISPLAY, false);
-        mDevice.SetMode (NTV2_CHANNEL6, NTV2_MODE_DISPLAY, false);
-        mDevice.SetMode (NTV2_CHANNEL7, NTV2_MODE_DISPLAY, false);
-        mDevice.SetMode (NTV2_CHANNEL8, NTV2_MODE_DISPLAY, false);
-
-		//	Set catpure mode
-		mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
-
-		//	Enable frame buffer
-		mDevice.EnableChannel (mInputChannel);
-        mDevice.EnableChannel (mOutputChannel);
-
-		//	Save input source
-		mInputSource = ::NTV2ChannelToInputSource (mInputChannel);
-	}
-
-	//	Set the device reference to the input...
-    if (mMultiStream)
-    {
-        mDevice.SetReference (NTV2_REFERENCE_FREERUN);
-    }
-    else
-    {
-        mDevice.SetReference (::NTV2InputSourceToReferenceSource (mInputSource));
-    }
-
-	//	Enable and subscribe to the interrupts for the channel to be used...
-	mDevice.EnableInputInterrupt (mInputChannel);
-	mDevice.SubscribeInputVerticalEvent (mInputChannel);
-
-    mTimeBase.SetAJAFrameRate (GetAJAFrameRate(GetNTV2FrameRateFromVideoFormat (mVideoFormat)));
-
-	return AJA_STATUS_SUCCESS;
-
-}	//	SetupVideo
-
-
-AJAStatus NTV2GstAVHevc::SetupAudio (void)
-{
-	ULWord numAudio = ::NTV2DeviceGetNumAudioSystems(mDeviceID);
-	
-    //	In multiformat mode, base the audio system on the channel...
-    if (mMultiStream && numAudio > 1 && UWord (mInputChannel) < numAudio)
-		mAudioSystem = ::NTV2ChannelToAudioSystem (mInputChannel);
-
-	//	Have the audio system capture audio from the designated device input (i.e., ch1 uses SDIIn1, ch2 uses SDIIn2, etc.)...
-	mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_EMBEDDED, ::NTV2ChannelToEmbeddedAudioInput (mInputChannel));
-
-    mNumAudioChannels = ::NTV2DeviceGetMaxAudioChannels (mDeviceID);
-    mDevice.SetNumberAudioChannels (mNumAudioChannels, mAudioSystem);
-	mDevice.SetAudioRate (NTV2_AUDIO_48K, mAudioSystem);
-    mDevice.SetEmbeddedAudioClock (NTV2_EMBEDDED_AUDIO_CLOCK_VIDEO_INPUT, mAudioSystem);
-
-	//	The on-device audio buffer should be 4MB to work best across all devices & platforms...
-	mDevice.SetAudioBufferSize (NTV2_AUDIO_BUFFER_BIG, mAudioSystem);
-
-	return AJA_STATUS_SUCCESS;
-
-}	//	SetupAudio
-
-
-void NTV2GstAVHevc::SetupHostBuffers (void)
-{
-	mVideoBufferSize = GetVideoActiveSize (mVideoFormat, mPixelFormat, NTV2_VANCMODE_OFF);
-    mPicInfoBufferSize = sizeof(HevcPictureInfo)*2;
-    mEncInfoBufferSize = sizeof(HevcEncodedInfo)*2;
-    mAudioBufferSize = NTV2_AUDIOSIZE_MAX;
-	
-	// video input ring
-    mACInputCircularBuffer.SetAbortFlag (&mGlobalQuit);
-    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++ )
-	{
-        memset (&mACInputBuffer[bufferNdx], 0, sizeof(AjaVideoBuff));
-        mACInputBuffer[bufferNdx].pVideoBuffer		= new uint32_t [mVideoBufferSize/4];
-        mACInputBuffer[bufferNdx].videoBufferSize	= mVideoBufferSize;
-        mACInputBuffer[bufferNdx].videoDataSize		= 0;
-        mACInputBuffer[bufferNdx].pInfoBuffer		= new uint32_t [mPicInfoBufferSize/4];
-        mACInputBuffer[bufferNdx].infoBufferSize    = mPicInfoBufferSize;
-        mACInputBuffer[bufferNdx].infoDataSize		= 0;
-        mACInputCircularBuffer.Add (& mACInputBuffer[bufferNdx]);
-	}
-    
-    // audio input ring
-    mAudioInputCircularBuffer.SetAbortFlag (&mGlobalQuit);
-    for (unsigned bufferNdx = 0; bufferNdx < AUDIO_RING_SIZE; bufferNdx++ )
-    {
-        memset (&mAudioInputBuffer[bufferNdx], 0, sizeof(AjaAudioBuff));
-        mAudioInputBuffer[bufferNdx].pAudioBuffer		= new uint32_t [mAudioBufferSize/4];
-        mAudioInputBuffer[bufferNdx].audioBufferSize	= mAudioBufferSize;
-        mAudioInputBuffer[bufferNdx].audioDataSize		= 0;
-        mAudioInputCircularBuffer.Add (& mAudioInputBuffer[bufferNdx]);
-    }
-
-    if (mHevcOutput)
-    {
-        // video hevc ring
-        mVideoHevcCircularBuffer.SetAbortFlag (&mGlobalQuit);
-        for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++ )
-        {
-            memset (&mVideoHevcBuffer[bufferNdx], 0, sizeof(AjaVideoBuff));
-            mVideoHevcBuffer[bufferNdx].pVideoBuffer	= new uint32_t [mVideoBufferSize/4];
-            mVideoHevcBuffer[bufferNdx].videoBufferSize	= mVideoBufferSize;
-            mVideoHevcBuffer[bufferNdx].videoDataSize	= 0;
-            mVideoHevcBuffer[bufferNdx].pInfoBuffer		= new uint32_t [mEncInfoBufferSize/4];
-            mVideoHevcBuffer[bufferNdx].infoBufferSize   = mEncInfoBufferSize;
-            mVideoHevcBuffer[bufferNdx].infoDataSize		= 0;
-            mVideoHevcCircularBuffer.Add (& mVideoHevcBuffer[bufferNdx]);
-        }
-    }
-    
-    // These video buffers are actually passed out of this class so we need to assign them unique numbers
-    // so they can be tracked and also they have a state
-    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_ARRAY_SIZE; bufferNdx++ )
-	{
-        memset (&mVideoOutBuffer[bufferNdx], 0, sizeof(AjaVideoBuff));
-        mVideoOutBuffer[bufferNdx].bufferId         = bufferNdx + 1;
-        mVideoOutBuffer[bufferNdx].bufferRef        = 0;
-        mVideoOutBuffer[bufferNdx].pVideoBuffer		= new uint32_t [mVideoBufferSize/4];
-        mVideoOutBuffer[bufferNdx].videoBufferSize	= mVideoBufferSize;
-        mVideoOutBuffer[bufferNdx].videoDataSize	= 0;
-        mVideoOutBuffer[bufferNdx].pInfoBuffer		= new uint32_t [mPicInfoBufferSize/4];
-        mVideoOutBuffer[bufferNdx].infoBufferSize   = mPicInfoBufferSize;
-        mVideoOutBuffer[bufferNdx].infoDataSize		= 0;
-	}
-
-    // These audio buffers are actually passed out of this class so we need to assign them unique numbers
-    // so they can be tracked and also they have a state
-    for (unsigned bufferNdx = 0; bufferNdx < AUDIO_ARRAY_SIZE; bufferNdx++ )
-    {
-        memset (&mAudioOutBuffer[bufferNdx], 0, sizeof(AjaAudioBuff));
-        mAudioOutBuffer[bufferNdx].bufferId             = bufferNdx + 1;
-        mAudioOutBuffer[bufferNdx].bufferRef            = 0;
-        mAudioOutBuffer[bufferNdx].pAudioBuffer         = new uint32_t [mAudioBufferSize/4];
-        mAudioOutBuffer[bufferNdx].audioBufferSize      = mAudioBufferSize;
-        mAudioOutBuffer[bufferNdx].audioDataSize		= 0;
-    }
-}	//	SetupHostBuffers
-
-
-void NTV2GstAVHevc::FreeHostBuffers (void)
-{
-    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++)
-    {
-        if (mACInputBuffer[bufferNdx].pVideoBuffer)
-        {
-            delete [] mACInputBuffer[bufferNdx].pVideoBuffer;
-            mACInputBuffer[bufferNdx].pVideoBuffer = NULL;
-        }
-        if (mACInputBuffer[bufferNdx].pInfoBuffer)
-        {
-            delete [] mACInputBuffer[bufferNdx].pInfoBuffer;
-            mACInputBuffer[bufferNdx].pInfoBuffer = NULL;
-        }
-    }
-
-    for (unsigned bufferNdx = 0; bufferNdx < AUDIO_RING_SIZE; bufferNdx++)
-    {
-        if (mAudioInputBuffer[bufferNdx].pAudioBuffer)
-        {
-            delete [] mAudioInputBuffer[bufferNdx].pAudioBuffer;
-            mAudioInputBuffer[bufferNdx].pAudioBuffer = NULL;
-        }
-    }
-
-    if (mHevcOutput)
-    {
-        for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++)
-        {
-            if (mVideoHevcBuffer[bufferNdx].pVideoBuffer)
-            {
-                delete [] mVideoHevcBuffer[bufferNdx].pVideoBuffer;
-                mVideoHevcBuffer[bufferNdx].pVideoBuffer = NULL;
-            }
-            if (mVideoHevcBuffer[bufferNdx].pInfoBuffer)
-            {
-                delete [] mVideoHevcBuffer[bufferNdx].pInfoBuffer;
-                mVideoHevcBuffer[bufferNdx].pInfoBuffer = NULL;
-            }
-        }
-    }
-
-    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_ARRAY_SIZE; bufferNdx++)
-    {
-        if (mVideoOutBuffer[bufferNdx].pVideoBuffer)
-        {
-            delete [] mVideoOutBuffer[bufferNdx].pVideoBuffer;
-            mVideoOutBuffer[bufferNdx].pVideoBuffer = NULL;
-        }
-        if (mVideoOutBuffer[bufferNdx].pInfoBuffer)
-        {
-            delete [] mVideoOutBuffer[bufferNdx].pInfoBuffer;
-            mVideoOutBuffer[bufferNdx].pInfoBuffer = NULL;
-        }
-    }
-
-    for (unsigned bufferNdx = 0; bufferNdx < AUDIO_ARRAY_SIZE; bufferNdx++)
-    {
-        if (mAudioOutBuffer[bufferNdx].pAudioBuffer)
-        {
-            delete [] mAudioOutBuffer[bufferNdx].pAudioBuffer;
-            mAudioOutBuffer[bufferNdx].pAudioBuffer = NULL;
-        }
-    }
-}
-
-
-void NTV2GstAVHevc::RouteInputSignal (void)
-{
-    // setup sdi io
-	mDevice.SetSDITransmitEnable (NTV2_CHANNEL1, false);
-	mDevice.SetSDITransmitEnable (NTV2_CHANNEL2, false);
-	mDevice.SetSDITransmitEnable (NTV2_CHANNEL3, false);
-	mDevice.SetSDITransmitEnable (NTV2_CHANNEL4, false);
-    mDevice.SetSDITransmitEnable (NTV2_CHANNEL5, true);
-    mDevice.SetSDITransmitEnable (NTV2_CHANNEL6, true);
-    mDevice.SetSDITransmitEnable (NTV2_CHANNEL7, true);
-    mDevice.SetSDITransmitEnable (NTV2_CHANNEL8, true);
-
-	//	Give the device some time to lock to the input signal...
-	mDevice.WaitForOutputVerticalInterrupt (mInputChannel, 8);
-
-	//	When input is 3Gb convert to 3Ga for capture (no RGB support?)
-	bool is3Gb = false;
-	mDevice.GetSDIInput3GbPresent (is3Gb, mInputChannel);
-
-	if (mQuad)
-	{
-		mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL1, is3Gb);
-		mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL2, is3Gb);
-		mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL3, is3Gb);
-		mDevice.SetSDIInLevelBtoLevelAConversion (NTV2_CHANNEL4, is3Gb);
-        mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL5, false);
-        mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL6, false);
-        mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL7, false);
-        mDevice.SetSDIOutLevelAtoLevelBConversion (NTV2_CHANNEL8, false);
-    }
-	else
-	{
-		mDevice.SetSDIInLevelBtoLevelAConversion (mInputChannel, is3Gb);
-        mDevice.SetSDIOutLevelAtoLevelBConversion (mOutputChannel, false);
-    }
-
-	if (!mMultiStream)			//	If not doing multistream...
-		mDevice.ClearRouting();	//	...replace existing routing
-
-	//	Connect FB inputs to SDI input spigots...
-	mDevice.Connect (NTV2_XptFrameBuffer1Input, NTV2_XptSDIIn1);
-	mDevice.Connect (NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
-	mDevice.Connect (NTV2_XptFrameBuffer3Input, NTV2_XptSDIIn3);
-	mDevice.Connect (NTV2_XptFrameBuffer4Input, NTV2_XptSDIIn4);
-
-	//	Connect SDI output spigots to FB outputs...
-    mDevice.Connect (NTV2_XptSDIOut5Input, NTV2_XptFrameBuffer5YUV);
-    mDevice.Connect (NTV2_XptSDIOut6Input, NTV2_XptFrameBuffer6YUV);
-    mDevice.Connect (NTV2_XptSDIOut7Input, NTV2_XptFrameBuffer7YUV);
-    mDevice.Connect (NTV2_XptSDIOut8Input, NTV2_XptFrameBuffer8YUV);
-
-	//	Give the device some time to lock to the input signal...
-	mDevice.WaitForOutputVerticalInterrupt (mInputChannel, 8);
-}
-
-
-void NTV2GstAVHevc::SetupAutoCirculate (void)
-{
-	//	Tell capture AutoCirculate to use 8 frame buffers on the device...
-    mInputTransferStruct.Clear();
-    mInputTransferStruct.acFrameBufferFormat = mPixelFormat;
-
-	mDevice.AutoCirculateStop (mInputChannel);
-	mDevice.AutoCirculateInitForInput (mInputChannel,	8,                  //	Frames to circulate
-										mAudioSystem,                       //	Which audio system
-										AUTOCIRCULATE_WITH_RP188);          //	With RP188?
-}
-
-
-AJAStatus NTV2GstAVHevc::Run ()
-{
-	if (mDevice.GetInputVideoFormat (mInputSource) == NTV2_FORMAT_UNKNOWN)
-        GST_WARNING ("No video signal present on the input connector");
-
-	// always start the AC thread
-    StartACThread ();
-    
-    // if not doing hevc output then just start the video output thread otherwise start the hevc threads
-    if (!mHevcOutput)
-    {
-        StartVideoOutputThread ();
-        StartAudioOutputThread ();
-    }
-    else
-    {
-        StartCodecRawThread ();
-        StartCodecHevcThread ();
-        StartHevcOutputThread ();
-        StartAudioOutputThread ();
-    }
-    
-    mStarted = true;
-	return AJA_STATUS_SUCCESS;
+  mVideoInputFrameCount = 0;
+  mVideoOutFrameCount = 0;
+  mCodecRawFrameCount = 0;
+  mCodecHevcFrameCount = 0;
+  mHevcOutFrameCount = 0;
+  mAudioOutFrameCount = 0;
+  mLastFrame = false;
+  mLastFrameInput = false;
+  mLastFrameVideoOut = false;
+  mLastFrameHevc = false;
+  mLastFrameHevcOut = false;
+  mLastFrameAudioOut = false;
+  mGlobalQuit = false;
+
+
+  //    Setup to capture video/audio/anc input
+  SetupAutoCirculate ();
+
+  //    Setup the circular buffers
+  SetupHostBuffers ();
+
+  if (mDevice.GetInputVideoFormat (mInputSource) == NTV2_FORMAT_UNKNOWN)
+    GST_WARNING ("No video signal present on the input connector");
+
+  // always start the AC thread
+  StartACThread ();
+
+  // if doing hevc output then start the hevc threads
+  if (mHevcOutput) {
+    StartCodecRawThread ();
+    StartCodecHevcThread ();
+  }
+
+  mStarted = true;
+  return AJA_STATUS_SUCCESS;
 }
 
 
 // This is where we will start the AC thread
-void NTV2GstAVHevc::StartACThread (void)
+void
+NTV2GstAV::StartACThread (void)
 {
-    mACInputThread = new AJAThread ();
-    mACInputThread->Attach (ACInputThreadStatic, this);
-    mACInputThread->SetPriority (AJA_ThreadPriority_High);
-    mACInputThread->Start ();
+  mACInputThread = new AJAThread ();
+  mACInputThread->Attach (ACInputThreadStatic, this);
+  mACInputThread->SetPriority (AJA_ThreadPriority_High);
+  mACInputThread->Start ();
 }
 
 
 // This is where we will stop the AC thread
-void NTV2GstAVHevc::StopACThread (void)
+void
+NTV2GstAV::StopACThread (void)
 {
-    if (mACInputThread)
-    {
-        while (mACInputThread->Active ())
-            AJATime::Sleep (10);
-        
-        delete mACInputThread;
-		mACInputThread = NULL;
-    }
+  if (mACInputThread) {
+    while (mACInputThread->Active ())
+      AJATime::Sleep (10);
+
+    delete mACInputThread;
+    mACInputThread = NULL;
+  }
 }
 
 
 // The video input thread static callback
-void NTV2GstAVHevc::ACInputThreadStatic (AJAThread * pThread, void * pContext)
+void
+NTV2GstAV::ACInputThreadStatic (AJAThread * pThread, void *pContext)
 {
-	(void) pThread;
+  (void) pThread;
 
-	NTV2GstAVHevc *	pApp (reinterpret_cast <NTV2GstAVHevc *> (pContext));
-    pApp->ACInputWorker ();
+  NTV2GstAV *pApp (reinterpret_cast < NTV2GstAV * >(pContext));
+  pApp->ACInputWorker ();
 }
 
 
-void NTV2GstAVHevc::ACInputWorker (void)
+void
+NTV2GstAV::ACInputWorker (void)
 {
-	// start AutoCirculate running...
-	mDevice.AutoCirculateStart (mInputChannel);
+  // Choose timecode source
+  NTV2TCIndex tcIndex, configuredTcIndex = (NTV2TCIndex)-1;
 
-	while (!mGlobalQuit)
-	{
-		AUTOCIRCULATE_STATUS	acStatus;
-		mDevice.AutoCirculateGetStatus (mInputChannel, acStatus);
+  // start AutoCirculate running...
+  mDevice.AutoCirculateStart (mInputChannel);
 
-        // wait for captured frame
-		if (acStatus.acState == NTV2_AUTOCIRCULATE_RUNNING && acStatus.acBufferLevel > 1)
-		{
-			// At this point, there's at least one fully-formed frame available in the device's
-			// frame buffer to transfer to the host. Reserve an AvaDataBuffer to "produce", and
-			// use it in the next transfer from the device...
-            AjaVideoBuff *	pVideoData	(mACInputCircularBuffer.StartProduceNextBuffer ());
-            if (pVideoData)
-            {
-                // setup buffer pointers for transfer
-                mInputTransferStruct.SetVideoBuffer(pVideoData->pVideoBuffer, pVideoData->videoBufferSize);
-                mInputTransferStruct.SetAudioBuffer(NULL, 0);
+  bool haveSignal = true;
 
-                AjaAudioBuff *	pAudioData = NULL;
-                pAudioData = mAudioInputCircularBuffer.StartProduceNextBuffer ();
-                if (pAudioData)
-                {
-                    mInputTransferStruct.SetAudioBuffer(pAudioData->pAudioBuffer, pAudioData->audioBufferSize);
-                }
+  while (!mGlobalQuit) {
+    AUTOCIRCULATE_STATUS acStatus;
+    mDevice.AutoCirculateGetStatus (mInputChannel, acStatus);
 
-                // do the transfer from the device into our host AvaDataBuffer...
-                mDevice.AutoCirculateTransfer (mInputChannel, mInputTransferStruct);
-
-                // get the video data size
-                pVideoData->videoDataSize = pVideoData->videoBufferSize;
-                pVideoData->lastFrame = mLastFrame;
-
-                // get the audio data size
-                pAudioData->audioDataSize = mInputTransferStruct.acTransferStatus.acAudioTransferSize;
-                pAudioData->lastFrame = mLastFrame;
-
-                if (mWithAnc)
-                {
-                    // get the sdi input anc data
-                    pVideoData->timeCodeDBB = mInputTransferStruct.acTransferStatus.acFrameStamp.acRP188.fDBB;
-                    pVideoData->timeCodeLow = mInputTransferStruct.acTransferStatus.acFrameStamp.acRP188.fLo;
-                    pVideoData->timeCodeHigh = mInputTransferStruct.acTransferStatus.acFrameStamp.acRP188.fHi;
-                }
-
-                if (mWithInfo)
-                {
-                    // get picture and additional data pointers
-                    HevcPictureInfo * pInfo = (HevcPictureInfo*)pVideoData->pInfoBuffer;
-                    HevcPictureData * pPicData = &pInfo->pictureData;
-
-                    // initialize info buffer to 0
-                    memset(pInfo, 0, pVideoData->infoBufferSize);
-
-                    // calculate pts based on 90 Khz clock tick
-                    uint64_t pts = (uint64_t)mTimeBase.FramesToMicroseconds(mVideoInputFrameCount)*90000/1000000;
-
-                    // set serial number, pts and picture number
-                    pPicData->serialNumber = mVideoInputFrameCount;         // can be anything
-                    pPicData->ptsValueLow = (uint32_t)(pts & 0xffffffff);
-                    pPicData->ptsValueHigh = (uint32_t)(pts >> 32);
-                    pPicData->pictureNumber = mVideoInputFrameCount + 1;    // must count starting with 1
-
-                    // set info data size
-                    pVideoData->infoDataSize = sizeof(HevcPictureData);
-                }
-
-                if(pVideoData->lastFrame && !mLastFrameInput)
-                {
-                    GST_INFO ("Capture last frame number %d", mVideoInputFrameCount);
-                    mLastFrameInput = true;
-                }
-
-                mVideoInputFrameCount++;
-
-                // signal that we're done "producing" the frame, making it available for future "consumption"...
-                if (pAudioData)
-                {
-                    mAudioInputCircularBuffer.EndProduceNextBuffer ();
-                }
-
-                if (pVideoData)
-                {
-                    mACInputCircularBuffer.EndProduceNextBuffer ();
-                }
-            }	// if A/C running and frame(s) are available for transfer
+    // Update timecode index if it changed since the last frame
+    if (configuredTcIndex == (NTV2TCIndex)-1 || configuredTcIndex != mTimecodeMode) {
+      configuredTcIndex = mTimecodeMode;
+      if (mTimecodeMode == NTV2_TCINDEX_LTC1 || mTimecodeMode == NTV2_TCINDEX_LTC2) {
+        tcIndex = mTimecodeMode;
+        mDevice.SetLTCInputEnable (true);
+      } else {
+        switch (mInputChannel) {
+          default:
+          case NTV2_CHANNEL1:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI1_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI1_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI1_2;
+            break;
+          case NTV2_CHANNEL2:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI2_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI2_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI2_2;
+            break;
+          case NTV2_CHANNEL3:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI3_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI3_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI3_2;
+            break;
+          case NTV2_CHANNEL4:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI4_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI4_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI4_2;
+            break;
+          case NTV2_CHANNEL5:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI5_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI5_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI5_2;
+            break;
+          case NTV2_CHANNEL6:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI6_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI6_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI6_2;
+            break;
+          case NTV2_CHANNEL7:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI7_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI7_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI7_2;
+            break;
+          case NTV2_CHANNEL8:
+            if (mTimecodeMode == NTV2_TCINDEX_SDI1)
+              tcIndex = NTV2_TCINDEX_SDI8_LTC;
+            else if (mTimecodeMode == NTV2_TCINDEX_SDI1_LTC)
+              tcIndex = NTV2_TCINDEX_SDI8_LTC;
+            else
+              tcIndex = NTV2_TCINDEX_SDI8_2;
+            break;
         }
-		else
-		{
-			// Either AutoCirculate is not running, or there were no frames available on the device to transfer.
-			// Rather than waste CPU cycles spinning, waiting until a frame becomes available, it's far more
-			// efficient to wait for the next input vertical interrupt event to get signaled...
-            mDevice.WaitForInputVerticalInterrupt (mInputChannel);
-		}
-	}	// loop til quit signaled
-
-	// Stop AutoCirculate...
-	mDevice.AutoCirculateStop (mInputChannel);
-}
-
-
-// This is where we start the video output thread
-void NTV2GstAVHevc::StartVideoOutputThread (void)
-{
-    mVideoOutputThread = new AJAThread ();
-    mVideoOutputThread->Attach (VideoOutputThreadStatic, this);
-    mVideoOutputThread->SetPriority (AJA_ThreadPriority_High);
-    mVideoOutputThread->Start ();
-}
-
-// This is where we stop the video output thread
-void NTV2GstAVHevc::StopVideoOutputThread (void)
-{
-    if (mVideoOutputThread)
-    {
-        while (mVideoOutputThread->Active ())
-            AJATime::Sleep (10);
-        
-        delete mVideoOutputThread;
-		mVideoOutputThread = NULL;
+      }
     }
-}
 
+    NTV2VideoFormat inputVideoFormat = mDevice.GetInputVideoFormat(mInputSource);
 
-// The video output static callback
-void NTV2GstAVHevc::VideoOutputThreadStatic (AJAThread * pThread, void * pContext)
-{
-	(void) pThread;
+    // For quad mode, we will get the format of a single input
+    NTV2VideoFormat effectiveVideoFormat = mVideoFormat;
+    switch (mVideoFormat) {
+      case NTV2_FORMAT_4x1920x1080p_2500:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_2500;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_3000:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_3000;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_5000:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_5000_A;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_5994:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_5994_A;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_6000:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_6000_A;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_2500:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_2500;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_3000:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_3000;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_5000:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_5000_A;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_5994:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_5994_A;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_6000:
+        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_6000_A;
+        break;
+      default:
+        break;
+    }
 
-	NTV2GstAVHevc *	pApp (reinterpret_cast <NTV2GstAVHevc *> (pContext));
-    pApp->VideoOutputWorker ();
-}
+    haveSignal = (effectiveVideoFormat == inputVideoFormat);
 
+    // wait for captured frame
+    if (acStatus.acState == NTV2_AUTOCIRCULATE_RUNNING
+        && acStatus.acBufferLevel > 1) {
+      // At this point, there's at least one fully-formed frame available in the device's
+      // frame buffer to transfer to the host. Reserve an AvaDataBuffer to "produce", and
+      // use it in the next transfer from the device...
+      AjaVideoBuff *pVideoData (mHevcOutput ?
+          mHevcInputCircularBuffer.StartProduceNextBuffer () :
+          AcquireVideoBuffer ());
+      GstMapInfo video_map, audio_map;
 
-void NTV2GstAVHevc::VideoOutputWorker (void)
-{
-	while (!mGlobalQuit)
-	{
-		// wait for the next video input buffer
-        AjaVideoBuff *	pFrameData (mACInputCircularBuffer.StartConsumeNextBuffer ());
-		if (pFrameData)
-		{
-            if (!mLastFrameVideoOut)
-			{
-                AjaVideoBuff * pDstFrame = AcquireVideoBuffer();
-                if (pDstFrame)
-                {
-                    memcpy(pDstFrame->pVideoBuffer, pFrameData->pVideoBuffer, pFrameData->videoDataSize);
-                    pDstFrame->fameNumber = mVideoOutFrameCount;
-                    pDstFrame->videoDataSize = pFrameData->videoDataSize;
-                    pDstFrame->timeCodeDBB = pFrameData->timeCodeDBB;
-                    pDstFrame->timeCodeLow = pFrameData->timeCodeLow;
-                    pDstFrame->timeCodeHigh = pFrameData->timeCodeHigh;
-                    pDstFrame->lastFrame = pFrameData->lastFrame;
-                    if (mWithInfo)
-                    {
-                        memcpy(pDstFrame->pInfoBuffer, pFrameData->pInfoBuffer, pFrameData->infoDataSize);
-                        pDstFrame->infoDataSize = pFrameData->infoDataSize;
-                    }
+      pVideoData->haveSignal = haveSignal;
 
-                    // The time duration is based off the frame rate and for now we will pass the absolute
-                    // time which will be adjusted by the start time in the layer above.
-                    pDstFrame->timeDuration = (uint64_t)mTimeBase.FramesToMicroseconds(1)*1000;
-                    GetHardwareClock(ASECOND, &pDstFrame->timeStamp);
+      if (pVideoData->buffer) {
+        gst_buffer_map (pVideoData->buffer, &video_map, GST_MAP_READWRITE);
+        pVideoData->pVideoBuffer = (uint32_t *) video_map.data;
+        pVideoData->videoBufferSize = video_map.size;
+      }
+      mInputTransferStruct.SetVideoBuffer (pVideoData->pVideoBuffer,
+          pVideoData->videoBufferSize);
 
-                    // Possible callbacks are not setup yet so make sure we release the buffer if
-                    // no one is there to catch them
-                    if (!DoCallback(VIDEO_CALLBACK, (int64_t) pDstFrame))
-                        ReleaseVideoBuffer(pDstFrame);
-                }
-                
-                if (pFrameData->lastFrame)
-				{
-                    GST_INFO ("Video out last frame number %d", mHevcOutFrameCount);
-					mLastFrameVideoOut = true;
-				}
-                
-                mVideoOutFrameCount++;
-            }
-            
-			// release the video input buffer
-            mACInputCircularBuffer.EndConsumeNextBuffer ();
+      AjaAudioBuff *pAudioData = AcquireAudioBuffer ();
+      pAudioData->haveSignal = haveSignal;
+      if (pAudioData->buffer) {
+        gst_buffer_map (pAudioData->buffer, &audio_map, GST_MAP_READWRITE);
+        pAudioData->pAudioBuffer = (uint32_t *) audio_map.data;
+        pAudioData->audioBufferSize = audio_map.size;
+      }
+      mInputTransferStruct.SetAudioBuffer (pAudioData->pAudioBuffer,
+          pAudioData->audioBufferSize);
 
+      // do the transfer from the device into our host AvaDataBuffer...
+      mDevice.AutoCirculateTransfer (mInputChannel, mInputTransferStruct);
+
+      // get the video data size
+      pVideoData->videoDataSize = pVideoData->videoBufferSize;
+      if (pVideoData->buffer) {
+        bool validVanc = false;
+        NTV2FrameGeometry currentGeometry;
+        gsize offset = 0;       // Offset in number of lines
+
+        mDevice.GetFrameGeometry (&currentGeometry);
+        switch (currentGeometry) {
+          case NTV2_FG_1920x1112:
+            // 32 line offset
+            // FIXME : Remove hardcording once gstntv2 is gstvideoformat aware
+            if (mBitDepth == 8)
+              offset = 32 * 1920 * 2;
+            else
+              offset = 32 * 1920 * 16 / 6;
+            validVanc = true;
+            break;
+          case NTV2_FG_1280x740:
+            // 20 line offset
+            // FIXME : Remove hardcording once gstntv2 is gstvideoformat aware
+            if (mBitDepth == 8)
+              offset = 20 * 1280 * 2;
+            else
+              offset = 20 * 1296 * 16 / 6;
+            validVanc = true;
+            break;
+          default:
+            if (mCaptureTall)
+              GST_ERROR ("UNKNOWN GEOMETRY %u!", currentGeometry);
+            break;
         }
-	}	// loop til quit signaled
-}
+        GST_DEBUG ("offset %" G_GSIZE_FORMAT, offset);
+        GST_DEBUG ("videoDataSize %u", pVideoData->videoDataSize);
+        gst_buffer_unmap (pVideoData->buffer, &video_map);
+        gst_buffer_resize (pVideoData->buffer, offset,
+            pVideoData->videoDataSize - offset);
+        pVideoData->pAncillaryData = validVanc ? pVideoData->pVideoBuffer : NULL;
+        pVideoData->pVideoBuffer = NULL;
+      }
+      pVideoData->lastFrame = mLastFrame;
 
+      // get the audio data size
+      pAudioData->audioDataSize =
+          mInputTransferStruct.acTransferStatus.acAudioTransferSize;
+      if (pAudioData->buffer) {
+        gst_buffer_unmap (pAudioData->buffer, &audio_map);
+        gst_buffer_resize (pAudioData->buffer, 0, pAudioData->audioDataSize);
+        pAudioData->pAudioBuffer = NULL;
+      }
+      pAudioData->lastFrame = mLastFrame;
+
+      // FIXME: this should actually use acAudioClockTimeStamp but
+      // it does not actually seem to be based on a 48kHz clock
+      pVideoData->timeStamp =
+          mInputTransferStruct.acTransferStatus.acFrameStamp.acFrameTime;
+      pAudioData->timeStamp =
+          mInputTransferStruct.acTransferStatus.acFrameStamp.acFrameTime;
+
+      pVideoData->fieldCount =
+          mInputTransferStruct.acTransferStatus.
+          acFrameStamp.acCurrentFieldCount;
+
+      pVideoData->frameNumber = mVideoInputFrameCount;
+      pAudioData->frameNumber = mVideoInputFrameCount;
+
+      pVideoData->timeCodeValid = false;
+      NTV2_RP188 timeCode;
+      if (mInputTransferStruct.acTransferStatus.
+          acFrameStamp.GetInputTimeCode (timeCode, tcIndex)) {
+        // get the sdi input anc data
+        pVideoData->timeCodeDBB = timeCode.fDBB;
+        pVideoData->timeCodeLow = timeCode.fLo;
+        pVideoData->timeCodeHigh = timeCode.fHi;
+        pVideoData->timeCodeValid = true;
+      }
+
+      if (mWithInfo) {
+        // get picture and additional data pointers
+        HevcPictureInfo *pInfo = (HevcPictureInfo *) pVideoData->pInfoBuffer;
+        HevcPictureData *pPicData = &pInfo->pictureData;
+
+        // initialize info buffer to 0
+        memset (pInfo, 0, pVideoData->infoBufferSize);
+
+        // calculate pts based on 90 Khz clock tick
+        uint64_t pts =
+            (uint64_t) mTimeBase.FramesToMicroseconds (mVideoInputFrameCount) *
+            90000 / 1000000;
+
+        // set serial number, pts and picture number
+        pPicData->serialNumber = mVideoInputFrameCount; // can be anything
+        pPicData->ptsValueLow = (uint32_t) (pts & 0xffffffff);
+        pPicData->ptsValueHigh = (uint32_t) (pts >> 32);
+        pPicData->pictureNumber = mVideoInputFrameCount + 1;    // must count starting with 1
+
+        // set info data size
+        pVideoData->infoDataSize = sizeof (HevcPictureData);
+      }
+
+      if (pVideoData->lastFrame && !mLastFrameInput) {
+        GST_INFO ("Capture last frame number %d", mVideoInputFrameCount);
+        mLastFrameInput = true;
+      }
+
+      mVideoInputFrameCount++;
+
+      if (mHevcOutput) {
+        mHevcInputCircularBuffer.EndProduceNextBuffer ();
+      } else {
+        // Possible callbacks are not setup yet so make sure we release the buffer if
+        // no one is there to catch them
+        if (!DoCallback (VIDEO_CALLBACK, pVideoData))
+          ReleaseVideoBuffer (pVideoData);
+
+        if (pVideoData->lastFrame) {
+          GST_INFO ("Video out last frame number %d", mVideoOutFrameCount);
+          mLastFrameVideoOut = true;
+        }
+
+        mVideoOutFrameCount++;
+      }
+
+      // Possible callbacks are not setup yet so make sure we release the buffer if
+      // no one is there to catch them
+      if (!DoCallback (AUDIO_CALLBACK, pAudioData))
+        ReleaseAudioBuffer (pAudioData);
+
+      if (pAudioData->lastFrame) {
+        GST_INFO ("Audio out last frame number %d", mAudioOutFrameCount);
+        mLastFrameAudioOut = true;
+      }
+      mAudioOutFrameCount++;
+    } else {
+      // Either AutoCirculate is not running, or there were no frames available on the device to transfer.
+      // Rather than waste CPU cycles spinning, waiting until a frame becomes available, it's far more
+      // efficient to wait for the next input vertical interrupt event to get signaled...
+      if (mLastFrame) {
+          mLastFrameVideoOut = true;
+          mLastFrameAudioOut = true;
+          break;
+      } else {
+        if (haveSignal) {
+          mDevice.WaitForInputVerticalInterrupt (mInputChannel);
+        } else {
+          DoCallback (VIDEO_CALLBACK, NULL);
+          DoCallback (AUDIO_CALLBACK, NULL);
+          // Short enough to not miss any frames at 60fps / 16.667ms per frame
+          g_usleep (16000);
+        }
+      }
+    }
+  }                             // loop til quit signaled
+
+  // Stop AutoCirculate...
+  mDevice.AutoCirculateStop (mInputChannel);
+}
 
 // This is where we start the codec raw thread
-void NTV2GstAVHevc::StartCodecRawThread (void)
+void
+NTV2GstAV::StartCodecRawThread (void)
 {
-    mCodecRawThread = new AJAThread ();
-    mCodecRawThread->Attach (CodecRawThreadStatic, this);
-    mCodecRawThread->SetPriority (AJA_ThreadPriority_High);
-    mCodecRawThread->Start ();
+  mCodecRawThread = new AJAThread ();
+  mCodecRawThread->Attach (CodecRawThreadStatic, this);
+  mCodecRawThread->SetPriority (AJA_ThreadPriority_High);
+  mCodecRawThread->Start ();
 }
 
 
 // This is where we stop the codec raw thread
-void NTV2GstAVHevc::StopCodecRawThread (void)
+void
+NTV2GstAV::StopCodecRawThread (void)
 {
-    if (mCodecRawThread)
-    {
-        while (mCodecRawThread->Active ())
-            AJATime::Sleep (10);
-        
-        delete mCodecRawThread;
-		mCodecRawThread = NULL;
-    }
+  if (mCodecRawThread) {
+    while (mCodecRawThread->Active ())
+      AJATime::Sleep (10);
+
+    delete mCodecRawThread;
+    mCodecRawThread = NULL;
+  }
 }
 
 
 // The codec raw static callback
-void NTV2GstAVHevc::CodecRawThreadStatic (AJAThread * pThread, void * pContext)
+void
+NTV2GstAV::CodecRawThreadStatic (AJAThread * pThread, void *pContext)
 {
-	(void) pThread;
+  (void) pThread;
 
-	NTV2GstAVHevc *	pApp (reinterpret_cast <NTV2GstAVHevc *> (pContext));
-    pApp->CodecRawWorker ();
+  NTV2GstAV *pApp (reinterpret_cast < NTV2GstAV * >(pContext));
+  pApp->CodecRawWorker ();
 }
 
 
-void NTV2GstAVHevc::CodecRawWorker (void)
+void
+NTV2GstAV::CodecRawWorker (void)
 {
-	while (!mGlobalQuit)
-	{
-		// wait for the next raw video frame
-        AjaVideoBuff *	pFrameData (mACInputCircularBuffer.StartConsumeNextBuffer ());
-		if (pFrameData)
-		{
-			if (!mLastFrameVideoOut)
-			{
-                // transfer the raw video frame to the codec
-                if (mWithInfo)
-                {
-                    mM31->RawTransfer(mEncodeChannel,
-                                      (uint8_t*)pFrameData->pVideoBuffer,
-                                      pFrameData->videoDataSize,
-                                      (uint8_t*)pFrameData->pInfoBuffer,
-                                      pFrameData->infoDataSize,
-                                      pFrameData->lastFrame);
-                }
-                else
-                {
-                    mM31->RawTransfer(mEncodeChannel,
-                                      (uint8_t*)pFrameData->pVideoBuffer,
-                                      pFrameData->videoDataSize,
-                                      pFrameData->lastFrame);
-                }
-                if (pFrameData->lastFrame)
-				{
-					mLastFrameVideoOut = true;
-				}
+  while (!mGlobalQuit) {
+    // wait for the next raw video frame
+    AjaVideoBuff
+        * pFrameData (mHevcInputCircularBuffer.StartConsumeNextBuffer ());
+    if (pFrameData) {
+      if (!mLastFrameVideoOut) {
+        // transfer the raw video frame to the codec
+        if (mWithInfo) {
+          mM31->RawTransfer (mEncodeChannel,
+              (uint8_t *) pFrameData->pVideoBuffer,
+              pFrameData->videoDataSize,
+              (uint8_t *) pFrameData->pInfoBuffer,
+              pFrameData->infoDataSize, pFrameData->lastFrame);
+        } else {
+          mM31->RawTransfer (mEncodeChannel,
+              (uint8_t *) pFrameData->pVideoBuffer,
+              pFrameData->videoDataSize, pFrameData->lastFrame);
+        }
+        if (pFrameData->lastFrame) {
+          mLastFrameVideoOut = true;
+        }
 
-                mCodecRawFrameCount++;
-            }
-
-			// release the raw video frame
-            mACInputCircularBuffer.EndConsumeNextBuffer ();
-		}
-	}  // loop til quit signaled
+        mCodecRawFrameCount++;
+      }
+      // release the raw video frame
+      mHevcInputCircularBuffer.EndConsumeNextBuffer ();
+    }
+  }                             // loop til quit signaled
 }
 
 
 // This is where we will start the codec hevc thread
-void NTV2GstAVHevc::StartCodecHevcThread (void)
+void
+NTV2GstAV::StartCodecHevcThread (void)
 {
-    mCodecHevcThread = new AJAThread ();
-    mCodecHevcThread->Attach (CodecHevcThreadStatic, this);
-    mCodecHevcThread->SetPriority (AJA_ThreadPriority_High);
-    mCodecHevcThread->Start ();
+  mCodecHevcThread = new AJAThread ();
+  mCodecHevcThread->Attach (CodecHevcThreadStatic, this);
+  mCodecHevcThread->SetPriority (AJA_ThreadPriority_High);
+  mCodecHevcThread->Start ();
 }
 
 // This is where we will stop the codec hevc thread
-void NTV2GstAVHevc::StopCodecHevcThread (void)
+void
+NTV2GstAV::StopCodecHevcThread (void)
 {
-    if (mCodecHevcThread)
-    {
-        while (mCodecHevcThread->Active ())
-            AJATime::Sleep (10);
-        
-        delete mCodecHevcThread;
-		mCodecHevcThread = NULL;
-    }
+  if (mCodecHevcThread) {
+    while (mCodecHevcThread->Active ())
+      AJATime::Sleep (10);
+
+    delete mCodecHevcThread;
+    mCodecHevcThread = NULL;
+  }
 }
 
 
 // The codec hevc static callback
-void NTV2GstAVHevc::CodecHevcThreadStatic (AJAThread * pThread, void * pContext)
+void
+NTV2GstAV::CodecHevcThreadStatic (AJAThread * pThread, void *pContext)
 {
-    (void) pThread;
+  (void) pThread;
 
-    NTV2GstAVHevc *	pApp (reinterpret_cast <NTV2GstAVHevc *> (pContext));
-    pApp->CodecHevcWorker ();
+  NTV2GstAV *pApp (reinterpret_cast < NTV2GstAV * >(pContext));
+  pApp->CodecHevcWorker ();
 }
 
 
-void NTV2GstAVHevc::CodecHevcWorker (void)
+void
+NTV2GstAV::CodecHevcWorker (void)
 {
-    while (!mGlobalQuit)
-    {
-        // wait for the next hevc frame 
-        AjaVideoBuff *	pFrameData (mVideoHevcCircularBuffer.StartProduceNextBuffer ());
-        if (pFrameData)
-        {
-			if (!mLastFrameHevc)
-			{
-                // transfer an hevc frame from the codec including encoded information
-                mM31->EncTransfer(mEncodeChannel,
-                                  (uint8_t*)pFrameData->pVideoBuffer,
-								  pFrameData->videoBufferSize,
-                                  (uint8_t*)pFrameData->pInfoBuffer,
-                                  pFrameData->infoBufferSize,
-                                  pFrameData->videoDataSize,
-                                  pFrameData->infoDataSize,
-                                  pFrameData->lastFrame);
+  while (!mGlobalQuit) {
 
-                if (pFrameData->lastFrame)
-				{
-					mLastFrameHevc = true;
-                }
+    if (!mLastFrameHevcOut) {
+      AjaVideoBuff *pDstFrame = AcquireVideoBuffer ();
+      if (pDstFrame) {
 
-                mCodecHevcFrameCount++;
-            }
+        // transfer an hevc frame from the codec including encoded information
+        mM31->EncTransfer (mEncodeChannel,
+            (uint8_t *) pDstFrame->pVideoBuffer,
+            pDstFrame->videoBufferSize,
+            (uint8_t *) pDstFrame->pInfoBuffer,
+            pDstFrame->infoBufferSize,
+            pDstFrame->videoDataSize,
+            pDstFrame->infoDataSize, pDstFrame->lastFrame);
 
-            // release and recycle the buffer...
-            mVideoHevcCircularBuffer.EndProduceNextBuffer ();
-        }
-    }	//	loop til quit signaled
-}
+        // FIXME: these are not passed properly from AC thread to here
+        // pDstFrame->frameNumber = pFrameData->frameNumber;
+        // pDstFrame->timeCodeDBB = pFrameData->timeCodeDBB;
+        // pDstFrame->timeCodeLow = pFrameData->timeCodeLow;
+        // pDstFrame->timeCodeHigh = pFrameData->timeCodeHigh;
+        // pDstFrame->timeStamp = pFrameData->timeStamp;
 
+        // Possible callbacks are not setup yet so make sure we release the buffer if
+        // no one is there to catch them
+        if (!DoCallback (VIDEO_CALLBACK, pDstFrame))
+          ReleaseVideoBuffer (pDstFrame);
+      }
 
-// This is where we start the Hevc output thread
-void NTV2GstAVHevc::StartHevcOutputThread (void)
-{
-    mHevcOutputThread = new AJAThread ();
-    mHevcOutputThread->Attach (HevcOutputThreadStatic, this);
-    mHevcOutputThread->SetPriority (AJA_ThreadPriority_High);
-    mHevcOutputThread->Start ();
-}
+      if (pDstFrame->lastFrame) {
+        GST_INFO ("Hevc out last frame number %d", mHevcOutFrameCount);
+        mLastFrameHevcOut = true;
+      }
 
-
-// This is where we stop the Hevc output thread
-void NTV2GstAVHevc::StopHevcOutputThread (void)
-{
-    if (mHevcOutputThread)
-    {
-        while (mHevcOutputThread->Active ())
-            AJATime::Sleep (10);
-        
-        delete mHevcOutputThread;
-		mHevcOutputThread = NULL;
+      mHevcOutFrameCount++;
     }
+  }                             //    loop til quit signaled
 }
 
-
-// The Hevc output static callback
-void NTV2GstAVHevc::HevcOutputThreadStatic (AJAThread * pThread, void * pContext)
+void
+NTV2GstAV::SetCallback (CallBackType cbType, NTV2Callback callback,
+    void *callbackRefcon)
 {
-    (void) pThread;
-
-    NTV2GstAVHevc *	pApp (reinterpret_cast <NTV2GstAVHevc *> (pContext));
-    pApp->HevcOutputWorker ();
-
-} // HevcOutputThreadStatic
-
-
-void NTV2GstAVHevc::HevcOutputWorker (void)
-{
-    while (!mGlobalQuit)
-    {
-        // wait for the next video input buffer
-        AjaVideoBuff *	pFrameData (mVideoHevcCircularBuffer.StartConsumeNextBuffer ());
-        if (pFrameData)
-        {
-            if (!mLastFrameHevcOut)
-            {
-                AjaVideoBuff * pDstFrame = AcquireVideoBuffer();
-                if (pDstFrame)
-                {
-                    memcpy(pDstFrame->pVideoBuffer, pFrameData->pVideoBuffer, pFrameData->videoDataSize);
-                    pDstFrame->fameNumber = mHevcOutFrameCount;
-                    pDstFrame->videoDataSize = pFrameData->videoDataSize;
-                    pDstFrame->timeCodeDBB = pFrameData->timeCodeDBB;
-                    pDstFrame->timeCodeLow = pFrameData->timeCodeLow;
-                    pDstFrame->timeCodeHigh = pFrameData->timeCodeHigh;
-                    pDstFrame->lastFrame = pFrameData->lastFrame;
-                    if (mWithInfo)
-                    {
-                        memcpy(pDstFrame->pInfoBuffer, pFrameData->pInfoBuffer, pFrameData->infoDataSize);
-                        pDstFrame->infoDataSize = pFrameData->infoDataSize;
-                    }
-
-                    // The time duration is based off the frame rate and for now we will pass the absolute
-                    // time which will be adjusted by the start time in the layer above.
-                    pDstFrame->timeDuration = (uint64_t)mTimeBase.FramesToMicroseconds(1)*1000;
-                    GetHardwareClock(ASECOND, &pDstFrame->timeStamp);
-
-                    // Possible callbacks are not setup yet so make sure we release the buffer if
-                    // no one is there to catch them
-                    if (!DoCallback(VIDEO_CALLBACK, (int64_t) pDstFrame))
-                        ReleaseVideoBuffer(pDstFrame);
-                }
-
-                if (pFrameData->lastFrame)
-                {
-                    GST_INFO ("Hevc out last frame number %d", mHevcOutFrameCount);
-                    mLastFrameHevcOut = true;
-                }
-
-                mHevcOutFrameCount++;
-            }
-            // release the video input buffer
-            mVideoHevcCircularBuffer.EndConsumeNextBuffer ();
-        }
-    }	// loop til quit signaled
+  if (cbType == VIDEO_CALLBACK) {
+    mVideoCallback = callback;
+    mVideoCallbackRefcon = callbackRefcon;
+  } else if (cbType == AUDIO_CALLBACK) {
+    mAudioCallback = callback;
+    mAudioCallbackRefcon = callbackRefcon;
+  }
 }
 
-
-// This is where we start the audio output thread
-void NTV2GstAVHevc::StartAudioOutputThread (void)
+AjaVideoBuff *
+NTV2GstAV::AcquireVideoBuffer ()
 {
-    mAudioOutputThread = new AJAThread ();
-    mAudioOutputThread->Attach (AudioOutputThreadStatic, this);
-    mAudioOutputThread->SetPriority (AJA_ThreadPriority_High);
-    mAudioOutputThread->Start ();
-}
+  GstBuffer *buffer;
+  AjaVideoBuff *videoBuff;
 
-
-// This is where we stop the audio output thread
-void NTV2GstAVHevc::StopAudioOutputThread (void)
-{
-    if (mAudioOutputThread)
-    {
-        while (mAudioOutputThread->Active ())
-            AJATime::Sleep (10);
-        
-        delete mAudioOutputThread;
-		mAudioOutputThread = NULL;
-    }
-}
-
-
-// The audio output static callback
-void NTV2GstAVHevc::AudioOutputThreadStatic (AJAThread * pThread, void * pContext)
-{
-    (void) pThread;
-
-    NTV2GstAVHevc *	pApp (reinterpret_cast <NTV2GstAVHevc *> (pContext));
-    pApp->AudioOutputWorker ();
-}
-
-
-void NTV2GstAVHevc::AudioOutputWorker (void)
-{
-    while (!mGlobalQuit)
-    {
-        // wait for the next codec hevc frame
-        AjaAudioBuff *	pFrameData (mAudioInputCircularBuffer.StartConsumeNextBuffer ());
-        if (pFrameData)
-        {
-            if (!mLastFrameAudioOut)
-            {
-                if (pFrameData->lastFrame)
-                {
-                    GST_INFO ("Audio out last frame number %d", mAudioOutFrameCount);
-                    mLastFrameAudioOut = true;
-                }
-            }
-
-            mAudioOutFrameCount++;
-
-            // release the hevc buffer
-            mAudioInputCircularBuffer.EndConsumeNextBuffer ();
-        }
-    } // loop til quit signaled
-}
-
-
-void NTV2GstAVHevc::SetCallback(CallBackType cbType, int64_t callback, int64_t callbackRefcon)
-{
-    if (cbType == VIDEO_CALLBACK)
-    {
-        mVideoCallback = callback;
-        mVideoCallbackRefcon = callbackRefcon;
-    }
-    else if (cbType == AUDIO_CALLBACK)
-    {
-        mAudioCallback = callback;
-        mAudioCallbackRefcon = callbackRefcon;
-    }
-}
-
-
-AjaVideoBuff* NTV2GstAVHevc::AcquireVideoBuffer()
-{
-    AJAAutoLock	autoLock (mLock);
-    
-    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_ARRAY_SIZE; bufferNdx++ )
-	{
-        if (mVideoOutBuffer[bufferNdx].bufferRef == 0)
-        {
-            mVideoOutBuffer[bufferNdx].bufferRef++;
-            //printf("acquired video buffer %d\n", mVideoOutBuffer[bufferNdx].bufferId);
-
-            return &mVideoOutBuffer[bufferNdx];
-        }
-	}
-    printf("Error: could not find a video buffer\n");
+  if (gst_buffer_pool_acquire_buffer (mVideoBufferPool, &buffer,
+          NULL) != GST_FLOW_OK)
     return NULL;
+
+  videoBuff = gst_aja_buffer_get_video_buff (buffer);
+  return videoBuff;
 }
 
-
-AjaAudioBuff* NTV2GstAVHevc::AcquireAudioBuffer()
+AjaAudioBuff *
+NTV2GstAV::AcquireAudioBuffer ()
 {
-    AJAAutoLock	autoLock (mLock);
+  GstBuffer *buffer;
+  AjaAudioBuff *audioBuff;
 
-    for (unsigned bufferNdx = 0; bufferNdx < AUDIO_ARRAY_SIZE; bufferNdx++ )
-	{
-        if (mAudioOutBuffer[bufferNdx].bufferRef == 0)
-        {
-            mAudioOutBuffer[bufferNdx].bufferRef++;
-            //printf("acquired audio buffer %d\n", mAudioOutBuffer[bufferNdx].bufferId);
-
-            return &mAudioOutBuffer[bufferNdx];
-        }
-	}
-    printf("Error: could not find an audio buffer\n");
+  if (gst_buffer_pool_acquire_buffer (mAudioBufferPool, &buffer,
+          NULL) != GST_FLOW_OK)
     return NULL;
+
+  audioBuff = gst_aja_buffer_get_audio_buff (buffer);
+  return audioBuff;
 }
 
 
-void NTV2GstAVHevc::ReleaseVideoBuffer(AjaVideoBuff * videoBuffer)
+void
+NTV2GstAV::ReleaseVideoBuffer (AjaVideoBuff * videoBuffer)
 {
-    AJAAutoLock	autoLock (mLock);
+  if (videoBuffer->buffer)
+    gst_buffer_unref (videoBuffer->buffer);
+}
 
-    if (videoBuffer->bufferRef)
-    {
-        videoBuffer->bufferRef--;
-        //printf("released video buffer %d %d\n", videoBuffer->bufferId, videoBuffer->bufferRef);
+
+void
+NTV2GstAV::ReleaseAudioBuffer (AjaAudioBuff * audioBuffer)
+{
+  if (audioBuffer->buffer)
+    gst_buffer_unref (audioBuffer->buffer);
+}
+
+
+void
+NTV2GstAV::AddRefVideoBuffer (AjaVideoBuff * videoBuffer)
+{
+  if (videoBuffer->buffer)
+    gst_buffer_ref (videoBuffer->buffer);
+}
+
+
+void
+NTV2GstAV::AddRefAudioBuffer (AjaAudioBuff * audioBuffer)
+{
+  if (audioBuffer->buffer)
+    gst_buffer_ref (audioBuffer->buffer);
+}
+
+
+bool NTV2GstAV::GetHardwareClock (uint64_t desiredTimeScale, uint64_t * time)
+{
+  uint32_t
+  audioCounter (0);
+
+  bool
+      status = mDevice.ReadRegister (kRegAud1Counter, &audioCounter);
+  *time = (audioCounter * desiredTimeScale) / 48000;
+  return status;
+}
+
+void
+NTV2GstAV::UpdateTimecodeIndex(const NTV2TCIndex inTimeCode)
+{
+  mTimecodeMode = inTimeCode;
+}
+
+AJAStatus
+    NTV2GstAV::DetermineInputFormat (NTV2Channel inputChannel, bool quad,
+    NTV2VideoFormat & videoFormat)
+{
+  NTV2VideoFormat sdiFormat = mDevice.GetSDIInputVideoFormat (inputChannel);
+  if (sdiFormat == NTV2_FORMAT_UNKNOWN)
+    return AJA_STATUS_FAIL;
+
+  switch (sdiFormat) {
+    case NTV2_FORMAT_1080p_5000_A:
+    case NTV2_FORMAT_1080p_5000_B:
+      videoFormat = NTV2_FORMAT_1080p_5000_A;
+      if (quad)
+        videoFormat = NTV2_FORMAT_4x1920x1080p_5000;
+      break;
+    case NTV2_FORMAT_1080p_5994_A:
+    case NTV2_FORMAT_1080p_5994_B:
+      videoFormat = NTV2_FORMAT_1080p_5994_A;
+      if (quad)
+        videoFormat = NTV2_FORMAT_4x1920x1080p_5994;
+      break;
+    case NTV2_FORMAT_1080p_6000_A:
+    case NTV2_FORMAT_1080p_6000_B:
+      videoFormat = NTV2_FORMAT_1080p_6000_A;
+      if (quad)
+        videoFormat = NTV2_FORMAT_4x1920x1080p_6000;
+      break;
+    default:
+      videoFormat = sdiFormat;
+      break;
+  }
+
+  return AJA_STATUS_SUCCESS;
+}
+
+
+AJA_FrameRate NTV2GstAV::GetAJAFrameRate (NTV2FrameRate frameRate)
+{
+  switch (frameRate) {
+    case NTV2_FRAMERATE_2398:
+      return AJA_FrameRate_2398;
+    case NTV2_FRAMERATE_2400:
+      return AJA_FrameRate_2400;
+    case NTV2_FRAMERATE_2500:
+      return AJA_FrameRate_2500;
+    case NTV2_FRAMERATE_2997:
+      return AJA_FrameRate_2997;
+    case NTV2_FRAMERATE_3000:
+      return AJA_FrameRate_3000;
+    case NTV2_FRAMERATE_4795:
+      return AJA_FrameRate_4795;
+    case NTV2_FRAMERATE_4800:
+      return AJA_FrameRate_4800;
+    case NTV2_FRAMERATE_5000:
+      return AJA_FrameRate_5000;
+    case NTV2_FRAMERATE_5994:
+      return AJA_FrameRate_5994;
+    case NTV2_FRAMERATE_6000:
+      return AJA_FrameRate_6000;
+    default:
+      break;
+  }
+
+  return AJA_FrameRate_Unknown;
+}
+
+
+bool NTV2GstAV::DoCallback (CallBackType type, void *msg)
+{
+  if (type == VIDEO_CALLBACK) {
+    if (mVideoCallback) {
+      return mVideoCallback (mVideoCallbackRefcon, msg);
     }
-}
-
-
-void NTV2GstAVHevc::ReleaseAudioBuffer(AjaAudioBuff * audioBuffer)
-{
-    AJAAutoLock	autoLock (mLock);
-
-    if (audioBuffer->bufferRef)
-    {
-        audioBuffer->bufferRef--;
-        //printf("released audio buffer %d %d\n", audioBuffer->bufferId, audioBuffer->bufferRef);
+  } else if (type == AUDIO_CALLBACK) {
+    if (mAudioCallback) {
+      return mAudioCallback (mAudioCallbackRefcon, msg);
     }
-}
-
-
-void NTV2GstAVHevc::AddRefVideoBuffer(AjaVideoBuff * videoBuffer)
-{
-    AJAAutoLock	autoLock (mLock);
-    videoBuffer->bufferRef++;
-    //printf("add ref video buffer %d %d\n", videoBuffer->bufferId, videoBuffer->bufferRef);
-}
-
-
-void NTV2GstAVHevc::AddRefAudioBuffer(AjaAudioBuff * audioBuffer)
-{
-    AJAAutoLock	autoLock (mLock);
-    audioBuffer->bufferRef++;
-    //printf("add ref audio buffer %d %d\n", audioBuffer->bufferId, audioBuffer->bufferRef);
-}
-
-
-bool NTV2GstAVHevc::GetHardwareClock(uint64_t desiredTimeScale, uint64_t * time)
-{
-    uint32_t    audioCounter(0);
-
-    bool status = mDevice.ReadRegister(kRegAud1Counter, &audioCounter);
-    *time = (audioCounter * desiredTimeScale) / 48000;
-    return status;
-}
-
-
-AJAStatus NTV2GstAVHevc::DetermineInputFormat(NTV2Channel inputChannel, bool quad, NTV2VideoFormat& videoFormat)
-{
-    NTV2VideoFormat sdiFormat = mDevice.GetSDIInputVideoFormat (inputChannel);
-    if (sdiFormat == NTV2_FORMAT_UNKNOWN)
-        return AJA_STATUS_FAIL;
-    
-    switch (sdiFormat)
-    {
-        case NTV2_FORMAT_1080p_5000_A:
-        case NTV2_FORMAT_1080p_5000_B:
-            videoFormat = NTV2_FORMAT_1080p_5000_A;
-            if (quad) videoFormat = NTV2_FORMAT_4x1920x1080p_5000;
-            break;
-        case NTV2_FORMAT_1080p_5994_A:
-        case NTV2_FORMAT_1080p_5994_B:
-            videoFormat = NTV2_FORMAT_1080p_5994_A;
-            if (quad) videoFormat = NTV2_FORMAT_4x1920x1080p_5994;
-            break;
-        case NTV2_FORMAT_1080p_6000_A:
-        case NTV2_FORMAT_1080p_6000_B:
-            videoFormat = NTV2_FORMAT_1080p_6000_A;
-            if (quad) videoFormat = NTV2_FORMAT_4x1920x1080p_6000;
-            break;
-        default:
-            videoFormat = sdiFormat;
-            break;
-    }
-    
-    return AJA_STATUS_SUCCESS;
-}
-
-
-AJA_FrameRate NTV2GstAVHevc::GetAJAFrameRate(NTV2FrameRate frameRate)
-{
-   switch (frameRate)
-   {
-   case NTV2_FRAMERATE_2398: return AJA_FrameRate_2398;
-   case NTV2_FRAMERATE_2400: return AJA_FrameRate_2400;
-   case NTV2_FRAMERATE_2500: return AJA_FrameRate_2500;
-   case NTV2_FRAMERATE_2997: return AJA_FrameRate_2997;
-   case NTV2_FRAMERATE_3000: return AJA_FrameRate_3000;
-   case NTV2_FRAMERATE_4795: return AJA_FrameRate_4795;
-   case NTV2_FRAMERATE_4800: return AJA_FrameRate_4800;
-   case NTV2_FRAMERATE_5000: return AJA_FrameRate_5000;
-   case NTV2_FRAMERATE_5994: return AJA_FrameRate_5994;
-   case NTV2_FRAMERATE_6000: return AJA_FrameRate_6000;
-   default: break;
-   }
-
-   return AJA_FrameRate_Unknown;
-}
-
-
-bool NTV2GstAVHevc::DoCallback(CallBackType type, int64_t msg)
-{
-    if (type == VIDEO_CALLBACK)
-    {
-        if (mVideoCallback)
-        {
-            NTV2Callback cb = (NTV2Callback) mVideoCallback;
-            return (*cb)(mVideoCallbackRefcon, msg);
-        }
-    }
-    else if (type == AUDIO_CALLBACK)
-    {
-        if (mAudioCallback)
-        {
-            NTV2Callback cb = (NTV2Callback) mAudioCallback;
-            return (*cb)(mAudioCallbackRefcon, msg);
-        }
-    }
-    return false;
+  }
+  return false;
 }

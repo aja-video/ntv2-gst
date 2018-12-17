@@ -69,9 +69,9 @@ enum
 
 /* class initialization */
 
-G_DEFINE_TYPE_WITH_CODE (GstAjavideosink, gst_aja_video_sink, GST_TYPE_VIDEO_SINK,
-  GST_DEBUG_CATEGORY_INIT (gst_aja_video_sink_debug, "aja_video_sink", 0,
-  "debug category for aja_video_sink element"));
+G_DEFINE_TYPE_WITH_CODE (GstAjavideosink, gst_aja_video_sink,
+    GST_TYPE_VIDEO_SINK, GST_DEBUG_CATEGORY_INIT (gst_aja_video_sink_debug,
+        "aja_video_sink", 0, "debug category for aja_video_sink element"));
 
 static void
 gst_aja_video_sink_class_init (GstAjavideosinkClass * klass)
@@ -81,11 +81,11 @@ gst_aja_video_sink_class_init (GstAjavideosinkClass * klass)
 
   /* Setting up pads and setting metadata should be moved to
      base_class_init if you intend to subclass this class. */
-  gst_element_class_add_pad_template (GST_ELEMENT_CLASS(klass),
+  gst_element_class_add_pad_template (GST_ELEMENT_CLASS (klass),
       gst_pad_template_new ("sink", GST_PAD_SINK, GST_PAD_ALWAYS,
-        gst_caps_from_string (VIDEO_SINK_CAPS)));
+          gst_caps_from_string (VIDEO_SINK_CAPS)));
 
-  gst_element_class_set_static_metadata (GST_ELEMENT_CLASS(klass),
+  gst_element_class_set_static_metadata (GST_ELEMENT_CLASS (klass),
       "FIXME Long name", "Generic", "FIXME Description",
       "FIXME <fixme@example.com>");
 
@@ -93,12 +93,13 @@ gst_aja_video_sink_class_init (GstAjavideosinkClass * klass)
   gobject_class->get_property = gst_aja_video_sink_get_property;
   gobject_class->dispose = gst_aja_video_sink_dispose;
   gobject_class->finalize = gst_aja_video_sink_finalize;
-  video_sink_class->show_frame = GST_DEBUG_FUNCPTR (gst_aja_video_sink_show_frame);
+  video_sink_class->show_frame =
+      GST_DEBUG_FUNCPTR (gst_aja_video_sink_show_frame);
 
 }
 
 static void
-gst_aja_video_sink_init (GstAjavideosink *aja_video_sink)
+gst_aja_video_sink_init (GstAjavideosink * aja_video_sink)
 {
 }
 
