@@ -92,8 +92,8 @@ gst_aja_acquire_input (const gchar * inDeviceSpecifier, gint channel,
 // *INDENT-OFF*
 #define NTSC    10, 11, false,  "bt601"
 #define PAL     12, 11, true,   "bt601"
-#define HD      1,  1,  false,  "bt709"
-#define UHD     1,  1,  false,  "bt2020"
+#define HD      1,  1,  true,   "bt709"
+#define UHD     1,  1,  true,   "bt2020"
 
 static const GstAjaMode modesRaw[GST_AJA_MODE_RAW_END] =
 {
