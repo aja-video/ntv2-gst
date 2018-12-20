@@ -20,7 +20,6 @@ libgstaja_la_LIBADD = \
 	-lgstaudio-1.0 \
 	-lgstvideo-1.0 \
 	-lajantv2 \
-	-lajabase \
 	-lpthread \
 	-lrt \
 	$(GST_BASE_LIBS) \

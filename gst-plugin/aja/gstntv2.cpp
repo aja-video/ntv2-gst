@@ -644,17 +644,17 @@ AJAStatus NTV2GstAV::SetupVideo (void)
             break;
       }
 
-      if(!::NTV2BoardCanDoInputSource (mDeviceID, mInputSource))
+      if(!::NTV2DeviceCanDoInputSource (mDeviceID, mInputSource))
         mInputSource = NTV2_INPUTSOURCE_SDI1;
 
       break;
     case NTV2_INPUTSOURCE_HDMI1:
       inputIdentifier = NTV2_XptHDMIIn;
-      mInputSource = NTV2_INPUTSOURCE_HDMI;
+      mInputSource = NTV2_INPUTSOURCE_HDMI1;
       break;
     case NTV2_INPUTSOURCE_ANALOG1:
       inputIdentifier = NTV2_XptAnalogIn;
-      mInputSource = NTV2_INPUTSOURCE_ANALOG;
+      mInputSource = NTV2_INPUTSOURCE_ANALOG1;
       break;
     default:
       g_assert_not_reached ();
@@ -707,10 +707,10 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   // Disable SDI output from the SDI input being used,
   // but only if the device supports bi-directional SDI,
   // and only if the input being used is an SDI input
-  if (::NTV2BoardHasBiDirectionalSDI (mDeviceID)) {
+  if (::NTV2DeviceHasBiDirectionalSDI (mDeviceID)) {
     mDevice.SetSDITransmitEnable(mInputChannel, false);
   } else {
-    if (mInputSource == NTV2_INPUTSOURCE_HDMI) {
+    if (mInputSource == NTV2_INPUTSOURCE_HDMI1) {
       // Enable HDMI passthrough
       router.AddConnection(NTV2_XptHDMIOutInput, NTV2_XptHDMIIn);
     } else {
