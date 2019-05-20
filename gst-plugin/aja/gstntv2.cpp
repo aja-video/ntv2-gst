@@ -149,17 +149,95 @@ AJAStatus
   AJAStatus status (AJA_STATUS_SUCCESS);
 
   mPreset = inPreset;
-  mVideoFormat = inVideoFormat;
   mVideoSource = inInputSource;
   mBitDepth = inBitDepth;
   mIs422 = inIs422;
   mIsAuto = inIsAuto;
   mHevcOutput = inHevcOutput;
-  mQuad = inQuadMode;
   mTimecodeMode = inTimeCode;
   mWithInfo = inInfoData;
   mCaptureTall = inCaptureTall;
   mPassthrough = mPassthrough;
+
+  // If the device can do 12g routing it won't be able to do quad/2SI and
+  // we simply switch to 12g routing for all quad modes (aka all 4k modes).
+  //
+  // We also have to switch from the 4x mode to the corresponding 12g moide
+  //
+  // TODO: The mode selection and parameters should be cleaned up at some point
+  // to handle this more cleanly, and also account for quad/2SI, dual-link/3g,
+  // A/B HD modes, different color formats, ...
+  if (inQuadMode && ::NTV2DeviceCanDo12gRouting(mDeviceID)) {
+    mQuad = false;
+    switch (inVideoFormat) {
+      case NTV2_FORMAT_4x1920x1080p_2398:
+        mVideoFormat = NTV2_FORMAT_3840x2160p_2398;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_2400:
+        mVideoFormat = NTV2_FORMAT_3840x2160p_2400;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_2500:
+        mVideoFormat = NTV2_FORMAT_3840x2160p_2500;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_2997:
+        mVideoFormat = NTV2_FORMAT_3840x2160p_2997;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_3000:
+        mVideoFormat = NTV2_FORMAT_3840x2160p_3000;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_5000:
+        mVideoFormat = NTV2_FORMAT_3840x2160p_5000;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_5994:
+        mVideoFormat = NTV2_FORMAT_3840x2160p_5994;
+        break;
+      case NTV2_FORMAT_4x1920x1080p_6000:
+        mVideoFormat = NTV2_FORMAT_3840x2160p_6000;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_2398:
+        mVideoFormat = NTV2_FORMAT_4096x2160p_2398;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_2400:
+        mVideoFormat = NTV2_FORMAT_4096x2160p_2400;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_2500:
+        mVideoFormat = NTV2_FORMAT_4096x2160p_2500;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_2997:
+        mVideoFormat = NTV2_FORMAT_4096x2160p_2997;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_3000:
+        mVideoFormat = NTV2_FORMAT_4096x2160p_3000;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_4795:
+        mVideoFormat = NTV2_FORMAT_4096x2160p_4795;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_4800:
+        mVideoFormat = NTV2_FORMAT_4096x2160p_4800;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_5000:
+        mVideoFormat = NTV2_FORMAT_4096x2160p_5000;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_5994:
+        mVideoFormat = NTV2_FORMAT_4096x2160p_5994;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_6000:
+        mVideoFormat = NTV2_FORMAT_4096x2160p_6000;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_11988:
+        mVideoFormat = NTV2_FORMAT_4096x2160p_11988;
+        break;
+      case NTV2_FORMAT_4x2048x1080p_12000:
+        mVideoFormat = NTV2_FORMAT_4096x2160p_12000;
+        break;
+      default:
+        g_assert_not_reached ();
+        break;
+    }
+  } else {
+    mQuad = inQuadMode;
+    mVideoFormat = inVideoFormat;
+  }
 
   if (mQuad) {
     if (mInputChannel != NTV2_CHANNEL1 && mInputChannel != NTV2_CHANNEL5) {
@@ -584,16 +662,6 @@ AJAStatus NTV2GstAV::SetupVideo (void)
     mDevice.EnableChannel ((NTV2Channel) (mInputChannel + 1));
     mDevice.EnableChannel ((NTV2Channel) (mInputChannel + 2));
     mDevice.EnableChannel ((NTV2Channel) (mInputChannel + 3));
-
-    if (::NTV2DeviceHasBiDirectionalSDI (mDeviceID)) {
-      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel), false);
-      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel + 1), false);
-      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel + 2), false);
-      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel + 3), false);
-      mDevice.WaitForOutputVerticalInterrupt ();
-      mDevice.WaitForOutputVerticalInterrupt ();
-      mDevice.WaitForOutputVerticalInterrupt ();
-    }
   }
 
   mDevice.SetVideoFormat(mVideoFormat, true, false, mInputChannel);
@@ -709,6 +777,15 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   // and only if the input being used is an SDI input
   if (::NTV2DeviceHasBiDirectionalSDI (mDeviceID)) {
     mDevice.SetSDITransmitEnable(mInputChannel, false);
+    if (mQuad) {
+      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel + 1), false);
+      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel + 2), false);
+      mDevice.SetSDITransmitEnable ((NTV2Channel) (mInputChannel + 3), false);
+      mDevice.WaitForOutputVerticalInterrupt ();
+      mDevice.WaitForOutputVerticalInterrupt ();
+      mDevice.WaitForOutputVerticalInterrupt ();
+    }
+    mDevice.WaitForOutputVerticalInterrupt ();
   } else {
     if (mInputSource == NTV2_INPUTSOURCE_HDMI1) {
       // Enable HDMI passthrough
