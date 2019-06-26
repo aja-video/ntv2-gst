@@ -717,8 +717,26 @@ AJAStatus NTV2GstAV::SetupVideo (void)
 
       break;
     case NTV2_INPUTSOURCE_HDMI1:
-      inputIdentifier = NTV2_XptHDMIIn;
-      mInputSource = NTV2_INPUTSOURCE_HDMI1;
+      // Select correct values based on channel
+      switch (mInputChannel) {
+         default:
+         case NTV2_CHANNEL1:
+            inputIdentifier = NTV2_XptHDMIIn1;
+            mInputSource    = NTV2_INPUTSOURCE_HDMI1;
+            break;
+         case NTV2_CHANNEL2:
+            inputIdentifier = NTV2_XptHDMIIn2;
+            mInputSource    = NTV2_INPUTSOURCE_HDMI2;
+            break;
+         case NTV2_CHANNEL3:
+            inputIdentifier = NTV2_XptHDMIIn3;
+            mInputSource    = NTV2_INPUTSOURCE_HDMI3;
+            break;
+         case NTV2_CHANNEL4:
+            inputIdentifier = NTV2_XptHDMIIn4;
+            mInputSource    = NTV2_INPUTSOURCE_HDMI4;
+            break;
+      }
       break;
     case NTV2_INPUTSOURCE_ANALOG1:
       inputIdentifier = NTV2_XptAnalogIn;
@@ -789,7 +807,15 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   } else {
     if (mInputSource == NTV2_INPUTSOURCE_HDMI1) {
       // Enable HDMI passthrough
-      router.AddConnection(NTV2_XptHDMIOutInput, NTV2_XptHDMIIn);
+      if (mInputChannel == NTV2_CHANNEL1) {
+        router.AddConnection(NTV2_XptHDMIOutQ1Input, NTV2_XptHDMIIn1);
+      } else if (mInputChannel == NTV2_CHANNEL2) {
+        router.AddConnection(NTV2_XptHDMIOutQ2Input, NTV2_XptHDMIIn2);
+      } else if (mInputChannel == NTV2_CHANNEL3) {
+        router.AddConnection(NTV2_XptHDMIOutQ3Input, NTV2_XptHDMIIn3);
+      } else if (mInputChannel == NTV2_CHANNEL4) {
+        router.AddConnection(NTV2_XptHDMIOutQ4Input, NTV2_XptHDMIIn4);
+      }
     } else {
       // enable SDI End to End mode for all AJA cards that don't support bidirectional SDI
 
@@ -973,7 +999,25 @@ AJAStatus NTV2GstAV::SetupAudio (void)
 
       break;
     case NTV2_AUDIO_HDMI:
-      mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_HDMI, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1);
+      switch (mInputChannel) {
+        default:
+        case NTV2_CHANNEL1:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_HDMI, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1, mAudioSystem);
+          break;
+        case NTV2_CHANNEL2:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_HDMI, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_2);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_2, mAudioSystem);
+          break;
+        case NTV2_CHANNEL3:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_HDMI, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_3);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_3, mAudioSystem);
+          break;
+        case NTV2_CHANNEL4:
+          mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_HDMI, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_4);
+          mDevice.SetEmbeddedAudioInput(NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_4, mAudioSystem);
+          break;
+      }
       break;
     case NTV2_AUDIO_AES:
       mDevice.SetAudioSystemInputSource (mAudioSystem, NTV2_AUDIO_AES, NTV2_EMBEDDED_AUDIO_INPUT_VIDEO_1);
