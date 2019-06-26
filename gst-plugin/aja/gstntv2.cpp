@@ -167,7 +167,10 @@ AJAStatus
   // TODO: The mode selection and parameters should be cleaned up at some point
   // to handle this more cleanly, and also account for quad/2SI, dual-link/3g,
   // A/B HD modes, different color formats, ...
-  if (inQuadMode && ::NTV2DeviceCanDo12gRouting(mDeviceID)) {
+  if (inQuadMode && mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
+    mQuad = inQuadMode;
+    mVideoFormat = inVideoFormat;
+  } else if (inQuadMode && ::NTV2DeviceCanDo12gRouting(mDeviceID)) {
     mQuad = false;
     switch (inVideoFormat) {
       case NTV2_FORMAT_4x1920x1080p_2398:
@@ -644,6 +647,15 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
   mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
 
+  if (mQuad) {
+    mDevice.Set4kSquaresEnable(true, (NTV2Channel) mInputChannel);
+    if (mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
+      mDevice.SetTsiFrameEnable(true, (NTV2Channel) mInputChannel);
+    } else {
+      mDevice.SetTsiFrameEnable(false, (NTV2Channel) mInputChannel);
+    }
+  }
+
   mDevice.EnableChannel (mInputChannel);
 
   //    Setup frame buffer
@@ -787,6 +799,11 @@ AJAStatus NTV2GstAV::SetupVideo (void)
       break;
   }
 
+  // Special-case for UHD HDMI
+  if (mQuad && mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
+    inputIdentifier = NTV2_Xpt425Mux1AYUV;
+  }
+
   // Add to the mapping to the router for this channel
   router.AddConnection (fbfInputSelect, inputIdentifier);
 
@@ -805,7 +822,7 @@ AJAStatus NTV2GstAV::SetupVideo (void)
     }
     mDevice.WaitForOutputVerticalInterrupt ();
   } else {
-    if (mInputSource == NTV2_INPUTSOURCE_HDMI1) {
+    if (mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
       // Enable HDMI passthrough
       if (mInputChannel == NTV2_CHANNEL1) {
         router.AddConnection(NTV2_XptHDMIOutQ1Input, NTV2_XptHDMIIn1);
@@ -833,17 +850,28 @@ AJAStatus NTV2GstAV::SetupVideo (void)
 
   // Enable UHD/4k quad mode
   if (mQuad) {
-    if (mInputChannel == NTV2_CHANNEL1) {
-      router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
-      router.AddConnection(NTV2_XptFrameBuffer3Input, NTV2_XptSDIIn3);
-      router.AddConnection(NTV2_XptFrameBuffer4Input, NTV2_XptSDIIn4);
+    if (mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
+        router.AddConnection(NTV2_XptFrameBuffer1BInput, NTV2_Xpt425Mux1BYUV);
+        router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_Xpt425Mux2AYUV);
+        router.AddConnection(NTV2_XptFrameBuffer2BInput, NTV2_Xpt425Mux2BYUV);
+
+        router.AddConnection(NTV2_Xpt425Mux1AInput, NTV2_XptHDMIIn1);
+        router.AddConnection(NTV2_Xpt425Mux1BInput, NTV2_XptHDMIIn1Q2);
+        router.AddConnection(NTV2_Xpt425Mux2AInput, NTV2_XptHDMIIn1Q3);
+        router.AddConnection(NTV2_Xpt425Mux2BInput, NTV2_XptHDMIIn1Q4);
     } else {
-      router.AddConnection(NTV2_XptFrameBuffer6Input, NTV2_XptSDIIn6);
-      router.AddConnection(NTV2_XptFrameBuffer7Input, NTV2_XptSDIIn7);
-      router.AddConnection(NTV2_XptFrameBuffer8Input, NTV2_XptSDIIn8);
+      if (mInputChannel == NTV2_CHANNEL1) {
+        router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
+        router.AddConnection(NTV2_XptFrameBuffer3Input, NTV2_XptSDIIn3);
+        router.AddConnection(NTV2_XptFrameBuffer4Input, NTV2_XptSDIIn4);
+      } else {
+        router.AddConnection(NTV2_XptFrameBuffer6Input, NTV2_XptSDIIn6);
+        router.AddConnection(NTV2_XptFrameBuffer7Input, NTV2_XptSDIIn7);
+        router.AddConnection(NTV2_XptFrameBuffer8Input, NTV2_XptSDIIn8);
+      }
+      mOutputChannel = NTV2_CHANNEL5;
+      mEncodeChannel = M31_CH0;
     }
-    mOutputChannel = NTV2_CHANNEL5;
-    mEncodeChannel = M31_CH0;
   }
 
   // Enable passthrough on bidirectional devices
@@ -1360,63 +1388,65 @@ NTV2GstAV::ACInputWorker (void)
 
     // For quad mode, we will get the format of a single input
     NTV2VideoFormat effectiveVideoFormat = mVideoFormat;
-    switch (mVideoFormat) {
-      case NTV2_FORMAT_4x1920x1080p_2398:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2398;
-        break;
-      case NTV2_FORMAT_4x1920x1080p_2400:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2400;
-        break;
-      case NTV2_FORMAT_4x1920x1080p_2500:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2500;
-        break;
-      case NTV2_FORMAT_4x1920x1080p_2997:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2997;
-        break;
-      case NTV2_FORMAT_4x1920x1080p_3000:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_3000;
-        break;
-      case NTV2_FORMAT_4x1920x1080p_5000:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_5000_A;
-        break;
-      case NTV2_FORMAT_4x1920x1080p_5994:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_5994_A;
-        break;
-      case NTV2_FORMAT_4x1920x1080p_6000:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_6000_A;
-        break;
-      case NTV2_FORMAT_4x2048x1080p_2398:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_2398;
-        break;
-      case NTV2_FORMAT_4x2048x1080p_2400:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_2400;
-        break;
-      case NTV2_FORMAT_4x2048x1080p_2500:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_2500;
-        break;
-      case NTV2_FORMAT_4x2048x1080p_2997:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_2997;
-        break;
-      case NTV2_FORMAT_4x2048x1080p_3000:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_3000;
-        break;
-      case NTV2_FORMAT_4x2048x1080p_4795:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_4795_A;
-        break;
-      case NTV2_FORMAT_4x2048x1080p_4800:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_4800_A;
-        break;
-      case NTV2_FORMAT_4x2048x1080p_5000:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_5000_A;
-        break;
-      case NTV2_FORMAT_4x2048x1080p_5994:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_5994_A;
-        break;
-      case NTV2_FORMAT_4x2048x1080p_6000:
-        effectiveVideoFormat = NTV2_FORMAT_1080p_2K_6000_A;
-        break;
-      default:
-        break;
+    if (mQuad && mVideoSource == NTV2_INPUTSOURCE_SDI1) {
+      switch (mVideoFormat) {
+        case NTV2_FORMAT_4x1920x1080p_2398:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2398;
+          break;
+        case NTV2_FORMAT_4x1920x1080p_2400:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2400;
+          break;
+        case NTV2_FORMAT_4x1920x1080p_2500:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2500;
+          break;
+        case NTV2_FORMAT_4x1920x1080p_2997:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2997;
+          break;
+        case NTV2_FORMAT_4x1920x1080p_3000:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_3000;
+          break;
+        case NTV2_FORMAT_4x1920x1080p_5000:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_5000_A;
+          break;
+        case NTV2_FORMAT_4x1920x1080p_5994:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_5994_A;
+          break;
+        case NTV2_FORMAT_4x1920x1080p_6000:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_6000_A;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_2398:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_2398;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_2400:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_2400;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_2500:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_2500;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_2997:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_2997;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_3000:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_3000;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_4795:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_4795_A;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_4800:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_4800_A;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_5000:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_5000_A;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_5994:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_5994_A;
+          break;
+        case NTV2_FORMAT_4x2048x1080p_6000:
+          effectiveVideoFormat = NTV2_FORMAT_1080p_2K_6000_A;
+          break;
+        default:
+          break;
+      }
     }
 
     haveSignal = (effectiveVideoFormat == inputVideoFormat);
