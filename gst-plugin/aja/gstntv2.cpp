@@ -289,7 +289,12 @@ AJAStatus
     default:
       mCaptureTall = false;
       break;
-    }
+  }
+
+  // Don't do full frame capture for HDMI
+  if (mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
+    mCaptureTall = false;
+  }
 
   //    Setup frame buffer
   status = SetupVideo ();
