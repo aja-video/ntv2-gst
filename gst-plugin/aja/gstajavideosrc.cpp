@@ -59,9 +59,16 @@ enum
   PROP_SIGNAL
 };
 
+typedef enum {
+  NO_CHANGE,
+  GOT_SIGNAL,
+  LOST_SIGNAL,
+} SignalChange;
+
 typedef struct
 {
   GstAjaVideoSrc *video_src;
+  SignalChange signal_change;
   AjaVideoBuff *video_buff;
   GstClockTime capture_time;
   GstClockTime stream_time;
@@ -73,7 +80,7 @@ aja_capture_video_frame_free (void *data)
 {
   AjaCaptureVideoFrame *frame = (AjaCaptureVideoFrame *) data;
 
-  if ((frame->video_src->input) && (frame->video_src->input->ntv2AVHevc))
+  if ((frame->video_buff) && (frame->video_src->input) && (frame->video_src->input->ntv2AVHevc))
     frame->video_src->input->ntv2AVHevc->ReleaseVideoBuffer (frame->video_buff);
   g_free (frame);
 }
@@ -960,27 +967,49 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
   else
     capture_pipeline = 0;
 
+  // Check if we have no signal
+  if (videoBuff && !videoBuff->haveSignal) {
+    src->input->ntv2AVHevc->ReleaseVideoBuffer (videoBuff);
+    videoBuff = NULL;
+  }
+
+  g_mutex_lock (&src->lock);
   // Check if we switched from having no signal to having signal,
   // or the other way around
-  if (!videoBuff || (!videoBuff->haveSignal && src->have_signal)) {
+  if (!videoBuff) {
     if (src->have_signal) {
       src->have_signal = FALSE;
-      g_object_notify (G_OBJECT (src), "signal");
-      GST_ELEMENT_WARNING (GST_ELEMENT (src), RESOURCE, READ, ("No signal"),
-          ("No input source was detected - video frames invalid"));
+
+      // Signal to the streaming thread that we lost signal so it can handle
+      // this after all remaining queued up frames are handled
+      if (!src->flushing) {
+        AjaCaptureVideoFrame *f;
+
+        f = (AjaCaptureVideoFrame *) g_malloc0 (sizeof (AjaCaptureVideoFrame));
+        f->signal_change = LOST_SIGNAL;
+
+        g_queue_push_tail (&src->current_frames, f);
+        g_cond_signal (&src->cond);
+      }
     }
 
-    if (videoBuff)
-      src->input->ntv2AVHevc->ReleaseVideoBuffer (videoBuff);
-
+    g_mutex_unlock (&src->lock);
     return;
   } else if ((videoBuff->haveSignal && !src->have_signal) || src->discont_time == GST_CLOCK_TIME_NONE) {
     if (!src->have_signal) {
       src->have_signal = TRUE;
 
-      g_object_notify (G_OBJECT (src), "signal");
-      GST_ELEMENT_INFO (GST_ELEMENT (src), RESOURCE, READ, ("Signal found"),
-          ("Input source detected"));
+      // Signal to the streaming thread that we got signal again so it can handle
+      // this after all remaining queued up frames are handled
+      if (!src->flushing) {
+        AjaCaptureVideoFrame *f;
+
+        f = (AjaCaptureVideoFrame *) g_malloc0 (sizeof (AjaCaptureVideoFrame));
+        f->signal_change = GOT_SIGNAL;
+
+        g_queue_push_tail (&src->current_frames, f);
+        g_cond_signal (&src->cond);
+      }
     }
 
     src->discont_time = capture_pipeline;
@@ -994,7 +1023,6 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
   //GST_ERROR_OBJECT (src, "Got video frame at %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_time));
   //GST_ERROR_OBJECT (src, "Got video duration %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_duration));
 
-  g_mutex_lock (&src->lock);
   if (src->first_time == GST_CLOCK_TIME_NONE)
     src->first_time = stream_time;
 
@@ -1020,17 +1048,30 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
         src->current_time_mapping.num, src->current_time_mapping.den);
   }
 
-
   //GST_ERROR_OBJECT (src, "Actual timestamp %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_time));
 
   if (!src->flushing) {
     AjaCaptureVideoFrame *f;
+    SignalChange signal_change = NO_CHANGE;
 
     while (g_queue_get_length (&src->current_frames) >= src->queue_size) {
       f = (AjaCaptureVideoFrame *) g_queue_pop_head (&src->current_frames);
-      GST_WARNING_OBJECT (src, "Dropping old frame at %" GST_TIME_FORMAT,
-          GST_TIME_ARGS (f->capture_time));
+
+      // We need to remember if we got signal back here at some point
+      if (f->signal_change == GOT_SIGNAL)
+        signal_change = GOT_SIGNAL;
+      if (f->video_buff) {
+        GST_WARNING_OBJECT (src, "Dropping old frame at %" GST_TIME_FORMAT,
+            GST_TIME_ARGS (f->capture_time));
+      }
       aja_capture_video_frame_free (f);
+    }
+
+    // Write the GOT_SIGNAL change into the oldest frame again
+    if (signal_change == GOT_SIGNAL) {
+      f = (AjaCaptureVideoFrame *) g_queue_peek_head (&src->current_frames);
+      if (f)
+        f->signal_change = GOT_SIGNAL;
     }
 
     f = (AjaCaptureVideoFrame *) g_malloc0 (sizeof (AjaCaptureVideoFrame));
@@ -1039,6 +1080,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
     f->capture_time = timestamp;
     f->stream_time = stream_time;
     f->mode = src->modeEnum;
+    f->signal_change = NO_CHANGE;
 
     g_queue_push_tail (&src->current_frames, f);
     g_cond_signal (&src->cond);
@@ -1153,21 +1195,38 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
   guint8 *ancillary_data;
 
   g_mutex_lock (&src->lock);
+retry:
   while (g_queue_is_empty (&src->current_frames) && !src->flushing) {
     g_cond_wait (&src->cond, &src->lock);
   }
 
   f = (AjaCaptureVideoFrame *) g_queue_pop_head (&src->current_frames);
-  g_mutex_unlock (&src->lock);
 
   if (src->flushing) {
+    g_mutex_unlock (&src->lock);
     if (f)
       aja_capture_video_frame_free (f);
     GST_DEBUG_OBJECT (src, "Flushing");
     return GST_FLOW_FLUSHING;
   }
 
-  g_mutex_lock (&src->lock);
+  // First of all, notify about signal change
+  if (f->signal_change == GOT_SIGNAL) {
+    g_object_notify (G_OBJECT (src), "signal");
+    GST_ELEMENT_INFO (GST_ELEMENT (src), RESOURCE, READ, ("Signal found"),
+        ("Input source detected"));
+  } else if (f->signal_change == LOST_SIGNAL) {
+    g_object_notify (G_OBJECT (src), "signal");
+    GST_ELEMENT_WARNING (GST_ELEMENT (src), RESOURCE, READ, ("No signal"),
+        ("No input source was detected - video frames invalid"));
+  }
+
+  // Retry if we got no video buffer
+  if (!f->video_buff) {
+    aja_capture_video_frame_free (f);
+    goto retry;
+  }
+
   if (src->modeEnum != f->mode) {
     GST_DEBUG_OBJECT (src, "Mode changed from %d to %d", src->modeEnum,
         f->mode);
