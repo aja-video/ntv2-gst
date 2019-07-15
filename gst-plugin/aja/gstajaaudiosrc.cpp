@@ -662,7 +662,7 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
   GstClockTime stream_time, timestamp;
 
   // Just return if we have no signal
-  if (!audioBuff || (!audioBuff->haveSignal && src->have_signal)) {
+  if (!audioBuff || !audioBuff->haveSignal) {
     if (audioBuff)
       src->input->ntv2AVHevc->ReleaseAudioBuffer (audioBuff);
     return;
