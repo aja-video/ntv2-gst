@@ -62,6 +62,7 @@ enum
 typedef enum {
   NO_CHANGE,
   GOT_SIGNAL,
+  RECOVERED_SIGNAL,
   LOST_SIGNAL,
 } SignalChange;
 
@@ -250,6 +251,8 @@ gst_aja_video_src_init (GstAjaVideoSrc * src)
   src->window_skip = 1;
   src->window_skip_count = 0;
 
+  src->signal_state = SIGNAL_STATE_UNKNOWN;
+
   gst_base_src_set_live (GST_BASE_SRC (src), TRUE);
   gst_base_src_set_format (GST_BASE_SRC (src), GST_FORMAT_TIME);
 
@@ -398,7 +401,7 @@ gst_aja_video_src_get_property (GObject * object, guint property_id,
       break;
 
     case PROP_SIGNAL:
-      g_value_set_boolean (value, src->have_signal);
+      g_value_set_boolean (value, src->signal_state == SIGNAL_STATE_AVAILABLE);
       break;
 
     default:
@@ -706,6 +709,7 @@ gst_aja_video_src_stop (GstAjaVideoSrc * src)
   g_queue_foreach (&src->current_frames, (GFunc) aja_capture_video_frame_free,
       NULL);
   g_queue_clear (&src->current_frames);
+  src->signal_state = SIGNAL_STATE_UNKNOWN;
 
   return TRUE;
 }
@@ -723,7 +727,7 @@ gst_aja_video_src_start_streams (GstElement * element)
     GST_DEBUG_OBJECT (src, "Starting streams");
 
     g_mutex_lock (&src->lock);
-    src->have_signal = TRUE;
+    src->signal_state = SIGNAL_STATE_UNKNOWN;
     src->discont_time = GST_CLOCK_TIME_NONE;
     src->discont_frame_number = 0;
     src->first_time = GST_CLOCK_TIME_NONE;
@@ -977,8 +981,8 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
   // Check if we switched from having no signal to having signal,
   // or the other way around
   if (!videoBuff) {
-    if (src->have_signal) {
-      src->have_signal = FALSE;
+    if (src->signal_state != SIGNAL_STATE_LOST) {
+      src->signal_state = SIGNAL_STATE_LOST;
 
       // Signal to the streaming thread that we lost signal so it can handle
       // this after all remaining queued up frames are handled
@@ -995,9 +999,10 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
 
     g_mutex_unlock (&src->lock);
     return;
-  } else if ((videoBuff->haveSignal && !src->have_signal) || src->discont_time == GST_CLOCK_TIME_NONE) {
-    if (!src->have_signal) {
-      src->have_signal = TRUE;
+  } else if (src->signal_state != SIGNAL_STATE_AVAILABLE || src->discont_time == GST_CLOCK_TIME_NONE) {
+    GstAjaSignalState previous_signal_state = src->signal_state;
+    if (src->signal_state != SIGNAL_STATE_AVAILABLE) {
+      src->signal_state = SIGNAL_STATE_AVAILABLE;
 
       // Signal to the streaming thread that we got signal again so it can handle
       // this after all remaining queued up frames are handled
@@ -1005,7 +1010,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
         AjaCaptureVideoFrame *f;
 
         f = (AjaCaptureVideoFrame *) g_malloc0 (sizeof (AjaCaptureVideoFrame));
-        f->signal_change = GOT_SIGNAL;
+        f->signal_change = previous_signal_state == SIGNAL_STATE_LOST ? RECOVERED_SIGNAL : GOT_SIGNAL;
 
         g_queue_push_tail (&src->current_frames, f);
         g_cond_signal (&src->cond);
@@ -1058,8 +1063,9 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
       f = (AjaCaptureVideoFrame *) g_queue_pop_head (&src->current_frames);
 
       // We need to remember if we got signal back here at some point
-      if (f->signal_change == GOT_SIGNAL)
-        signal_change = GOT_SIGNAL;
+      if ((f->signal_change == GOT_SIGNAL && signal_change != RECOVERED_SIGNAL)
+          || f->signal_change == RECOVERED_SIGNAL)
+        signal_change = f->signal_change;
       if (f->video_buff) {
         GST_WARNING_OBJECT (src, "Dropping old frame at %" GST_TIME_FORMAT,
             GST_TIME_ARGS (f->capture_time));
@@ -1068,10 +1074,10 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
     }
 
     // Write the GOT_SIGNAL change into the oldest frame again
-    if (signal_change == GOT_SIGNAL) {
+    if (signal_change != NO_CHANGE) {
       f = (AjaCaptureVideoFrame *) g_queue_peek_head (&src->current_frames);
       if (f)
-        f->signal_change = GOT_SIGNAL;
+        f->signal_change = signal_change;
     }
 
     f = (AjaCaptureVideoFrame *) g_malloc0 (sizeof (AjaCaptureVideoFrame));
@@ -1211,13 +1217,14 @@ retry:
   }
 
   // First of all, notify about signal change
-  if (f->signal_change == GOT_SIGNAL) {
+  if (f->signal_change == GOT_SIGNAL || f->signal_change == RECOVERED_SIGNAL) {
     g_object_notify (G_OBJECT (src), "signal");
-    GST_ELEMENT_INFO (GST_ELEMENT (src), RESOURCE, READ, ("Signal found"),
+    if (f->signal_change == RECOVERED_SIGNAL)
+      GST_ELEMENT_INFO (GST_ELEMENT (src), RESOURCE, READ, ("Signal recovered"),
         ("Input source detected"));
   } else if (f->signal_change == LOST_SIGNAL) {
     g_object_notify (G_OBJECT (src), "signal");
-    GST_ELEMENT_WARNING (GST_ELEMENT (src), RESOURCE, READ, ("No signal"),
+    GST_ELEMENT_WARNING (GST_ELEMENT (src), RESOURCE, READ, ("Signal lost"),
         ("No input source was detected - video frames invalid"));
   }
 
