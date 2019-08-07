@@ -92,8 +92,6 @@ static void gst_aja_video_src_get_property (GObject * object, guint property_id,
 
 static void gst_aja_video_src_finalize (GObject * object);
 
-static gboolean gst_aja_video_src_set_caps (GstBaseSrc * src, GstCaps * caps);
-static GstCaps *gst_aja_video_src_get_caps (GstBaseSrc * src, GstCaps * filter);
 static gboolean gst_aja_video_src_query (GstBaseSrc * src, GstQuery * query);
 static gboolean gst_aja_video_src_unlock (GstBaseSrc * src);
 static gboolean gst_aja_video_src_unlock_stop (GstBaseSrc * src);
@@ -132,9 +130,8 @@ gst_aja_video_src_class_init (GstAjaVideoSrcClass * klass)
   element_class->change_state =
       GST_DEBUG_FUNCPTR (gst_aja_video_src_change_state);
 
-  basesrc_class->get_caps = GST_DEBUG_FUNCPTR (gst_aja_video_src_get_caps);
-  basesrc_class->set_caps = GST_DEBUG_FUNCPTR (gst_aja_video_src_set_caps);
   basesrc_class->query = GST_DEBUG_FUNCPTR (gst_aja_video_src_query);
+  basesrc_class->negotiate = NULL;
   basesrc_class->unlock = GST_DEBUG_FUNCPTR (gst_aja_video_src_unlock);
   basesrc_class->unlock_stop =
       GST_DEBUG_FUNCPTR (gst_aja_video_src_unlock_stop);
@@ -252,6 +249,8 @@ gst_aja_video_src_init (GstAjaVideoSrc * src)
 
   gst_base_src_set_live (GST_BASE_SRC (src), TRUE);
   gst_base_src_set_format (GST_BASE_SRC (src), GST_FORMAT_TIME);
+
+  gst_pad_use_fixed_caps (GST_BASE_SRC_PAD (src));
 
   g_mutex_init (&src->lock);
   g_cond_init (&src->cond);
@@ -431,34 +430,21 @@ gst_aja_video_src_finalize (GObject * object)
 
 /* notify the subclass of new caps */
 static gboolean
-gst_aja_video_src_set_caps (GstBaseSrc * bsrc, GstCaps * caps)
+gst_aja_video_src_start (GstAjaVideoSrc *src)
 {
-  GstAjaVideoSrc *src = GST_AJA_VIDEO_SRC (bsrc);
-  GST_DEBUG_OBJECT (src, "set_caps");
+  GST_DEBUG_OBJECT (src, "start");
 
-  GstCaps *current_caps;
   const GstAjaMode *mode;
 
-  if ((current_caps = gst_pad_get_current_caps (GST_BASE_SRC_PAD (bsrc)))) {
-    GST_DEBUG_OBJECT (src, "Pad already has caps %" GST_PTR_FORMAT, caps);
-
-    if (!gst_caps_is_equal (caps, current_caps)) {
-      GST_DEBUG_OBJECT (src, "New caps, reconfiguring");
-      gst_caps_unref (current_caps);
-      return FALSE;
-    } else {
-      gst_caps_unref (current_caps);
-      return TRUE;
-    }
+  g_mutex_lock (&src->input->lock);
+  if (src->input->video_enabled) {
+    g_mutex_unlock (&src->input->lock);
+    return TRUE;
   }
-
-  if (!gst_video_info_from_caps (&src->info, caps))
-    return FALSE;
 
   mode = gst_aja_get_mode_raw (src->modeEnum);
   g_assert (mode != NULL);
 
-  g_mutex_lock (&src->input->lock);
   src->input->mode = mode;
   src->input->video_enabled = TRUE;
   if (src->input->start_streams)
@@ -466,29 +452,6 @@ gst_aja_video_src_set_caps (GstBaseSrc * bsrc, GstCaps * caps)
   g_mutex_unlock (&src->input->lock);
 
   return TRUE;
-}
-
-static GstCaps *
-gst_aja_video_src_get_caps (GstBaseSrc * bsrc, GstCaps * filter)
-{
-  GstAjaVideoSrc *src = GST_AJA_VIDEO_SRC (bsrc);
-  GST_DEBUG_OBJECT (src, "get_caps");
-
-  GstCaps *mode_caps, *caps;
-
-  g_mutex_lock (&src->lock);
-  mode_caps = gst_aja_mode_get_caps_raw (src->modeEnum);
-  g_mutex_unlock (&src->lock);
-
-  if (filter) {
-    caps =
-        gst_caps_intersect_full (filter, mode_caps, GST_CAPS_INTERSECT_FIRST);
-    gst_caps_unref (mode_caps);
-  } else {
-    caps = mode_caps;
-  }
-
-  return caps;
 }
 
 static gboolean
@@ -1194,6 +1157,10 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
   guint8 aja_field_count;
   guint8 *ancillary_data;
 
+  if (!gst_aja_video_src_start (src)) {
+    return GST_FLOW_NOT_NEGOTIATED;
+  }
+
   g_mutex_lock (&src->lock);
 retry:
   while (g_queue_is_empty (&src->current_frames) && !src->flushing) {
@@ -1227,9 +1194,9 @@ retry:
     goto retry;
   }
 
-  if (src->modeEnum != f->mode) {
-    GST_DEBUG_OBJECT (src, "Mode changed from %d to %d", src->modeEnum,
-        f->mode);
+  if (src->modeEnum != f->mode || !gst_pad_has_current_caps (GST_BASE_SRC_PAD (src))) {
+    if (src->modeEnum != f->mode)
+    GST_DEBUG_OBJECT (src, "Mode changed from %d to %d", src->modeEnum, f->mode);
     src->modeEnum = f->mode;
     g_mutex_unlock (&src->lock);
     caps = gst_aja_mode_get_caps_raw (f->mode);
