@@ -103,9 +103,6 @@ static void gst_aja_audio_src_get_property (GObject * object, guint property_id,
 static void gst_aja_audio_src_finalize (GObject * object);
 
 
-static gboolean gst_aja_audio_src_set_caps (GstBaseSrc * bsrc, GstCaps * caps);
-static GstCaps *gst_aja_audio_src_get_caps (GstBaseSrc * bsrc,
-    GstCaps * filter);
 static gboolean gst_aja_audio_src_unlock (GstBaseSrc * bsrc);
 static gboolean gst_aja_audio_src_unlock_stop (GstBaseSrc * bsrc);
 static gboolean gst_aja_audio_src_query (GstBaseSrc * bsrc, GstQuery * query);
@@ -142,9 +139,8 @@ gst_aja_audio_src_class_init (GstAjaAudioSrcClass * klass)
   element_class->change_state =
       GST_DEBUG_FUNCPTR (gst_aja_audio_src_change_state);
 
-  basesrc_class->get_caps = GST_DEBUG_FUNCPTR (gst_aja_audio_src_get_caps);
-  basesrc_class->set_caps = GST_DEBUG_FUNCPTR (gst_aja_audio_src_set_caps);
   basesrc_class->query = GST_DEBUG_FUNCPTR (gst_aja_audio_src_query);
+  basesrc_class->negotiate = NULL;
   basesrc_class->unlock = GST_DEBUG_FUNCPTR (gst_aja_audio_src_unlock);
   basesrc_class->unlock_stop =
       GST_DEBUG_FUNCPTR (gst_aja_audio_src_unlock_stop);
@@ -231,6 +227,7 @@ gst_aja_audio_src_init (GstAjaAudioSrc * src)
 
   gst_base_src_set_live (GST_BASE_SRC (src), TRUE);
   gst_base_src_set_format (GST_BASE_SRC (src), GST_FORMAT_TIME);
+  gst_pad_use_fixed_caps (GST_BASE_SRC_PAD (src));
 
   g_mutex_init (&src->lock);
   g_cond_init (&src->cond);
@@ -342,73 +339,38 @@ gst_aja_audio_src_finalize (GObject * object)
 }
 
 static gboolean
-gst_aja_audio_src_set_caps (GstBaseSrc * bsrc, GstCaps * caps)
+gst_aja_audio_src_start (GstAjaAudioSrc *src)
 {
-  GstAjaAudioSrc *src = GST_AJA_AUDIO_SRC (bsrc);
-  GST_DEBUG_OBJECT (src, "set_caps");
+  GstCaps *caps;
 
-  GstCaps *current_caps;
-
-  if ((current_caps = gst_pad_get_current_caps (GST_BASE_SRC_PAD (bsrc)))) {
-    GST_DEBUG_OBJECT (src, "Pad already has caps %" GST_PTR_FORMAT, caps);
-
-    if (!gst_caps_is_equal (caps, current_caps)) {
-      GST_ERROR_OBJECT (src, "New caps are not equal to old caps");
-      gst_caps_unref (current_caps);
-      return FALSE;
-    } else {
-      gst_caps_unref (current_caps);
-      return TRUE;
-    }
-  }
-
-  if (!gst_audio_info_from_caps (&src->info, caps))
-    return FALSE;
+  GST_DEBUG_OBJECT (src, "start");
 
   // FIXME do something to actually enable audio? is it always enabled?
   // FIXME Is there anything we can actually configure based on the caps?
 
   g_mutex_lock (&src->input->lock);
+  if (src->input->audio_enabled) {
+    g_mutex_unlock (&src->input->lock);
+    return TRUE;
+  }
+
   src->input->audio_enabled = TRUE;
   if (src->input->start_streams && src->input->videosrc)
     src->input->start_streams (src->input->videosrc);
   g_mutex_unlock (&src->input->lock);
 
-  return TRUE;
-}
+  gst_audio_info_set_format (&src->info,
+      GST_AUDIO_FORMAT_S32LE, 48000, src->channels, NULL);
 
-static GstCaps *
-gst_aja_audio_src_get_caps (GstBaseSrc * bsrc, GstCaps * filter)
-{
-  GstAjaAudioSrc *src = GST_AJA_AUDIO_SRC (bsrc);
-  GST_DEBUG_OBJECT (src, "get_caps");
-
-  // We don't support renegotiation
-  GstCaps *caps = gst_pad_get_current_caps (GST_BASE_SRC_PAD (bsrc));
-
-  if (!caps) {
-    caps = gst_pad_get_pad_template_caps (GST_BASE_SRC_PAD (bsrc));
-    if (src->channels) {
-      GstCaps *tmp, *channel_filter;
-
-      channel_filter =
-          gst_caps_new_simple ("audio/x-raw", "channels", G_TYPE_INT,
-          src->channels, NULL);
-      tmp = gst_caps_intersect (caps, channel_filter);
-      gst_caps_unref (caps);
-      gst_caps_unref (channel_filter);
-      caps = tmp;
-    }
-  }
-
-  if (filter) {
-    GstCaps *tmp =
-        gst_caps_intersect_full (filter, caps, GST_CAPS_INTERSECT_FIRST);
+  caps = gst_audio_info_to_caps (&src->info);
+  if (!gst_base_src_set_caps (GST_BASE_SRC (src), caps)) {
     gst_caps_unref (caps);
-    caps = tmp;
+    GST_WARNING_OBJECT (src, "Failed to set caps");
+    return FALSE;
   }
+  gst_caps_unref (caps);
 
-  return caps;
+  return TRUE;
 }
 
 static gboolean
@@ -755,6 +717,10 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
   static GstStaticCaps stream_reference =
       GST_STATIC_CAPS ("timestamp/x-aja-stream");
 
+  if (!gst_aja_audio_src_start (src)) {
+    return GST_FLOW_NOT_NEGOTIATED;
+  }
+
   g_mutex_lock (&src->lock);
   while (g_queue_is_empty (&src->current_packets) && !src->flushing) {
     g_cond_wait (&src->cond, &src->lock);
@@ -851,7 +817,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
       gst_static_caps_get (&stream_reference), stream_time, GST_CLOCK_TIME_NONE);
 #endif
 
-#if 0
+#if 1
   GST_DEBUG_OBJECT (src,
       "Outputting buffer %p with timestamp %" GST_TIME_FORMAT " and duration %"
       GST_TIME_FORMAT, *buffer, GST_TIME_ARGS (GST_BUFFER_TIMESTAMP (*buffer)),
