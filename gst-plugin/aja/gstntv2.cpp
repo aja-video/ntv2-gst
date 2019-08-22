@@ -1302,6 +1302,7 @@ NTV2GstAV::ACInputWorker (void)
 {
   // Choose timecode source
   NTV2TCIndex tcIndex, configuredTcIndex = (NTV2TCIndex)-1;
+  ULWord vpidA, vpidB;
 
   // start AutoCirculate running...
   mDevice.AutoCirculateStart (mInputChannel);
@@ -1390,6 +1391,11 @@ NTV2GstAV::ACInputWorker (void)
     }
 
     NTV2VideoFormat inputVideoFormat = mDevice.GetInputVideoFormat(mInputSource);
+    vpidA = 0;
+    vpidB = 0;
+    mDevice.ReadSDIInVPID(mInputChannel, vpidA, vpidB);
+
+    GST_DEBUG ("Got input video format %08x and VPIDs %08x / %08x", (int) inputVideoFormat, vpidA, vpidB);
 
     // For quad mode, we will get the format of a single input
     NTV2VideoFormat effectiveVideoFormat = mVideoFormat;
@@ -1453,6 +1459,8 @@ NTV2GstAV::ACInputWorker (void)
           break;
       }
     }
+
+    GST_DEBUG ("Expected video format %08x (effective %08x)", (int) mVideoFormat, (int) effectiveVideoFormat);
 
     haveSignal = (effectiveVideoFormat == inputVideoFormat);
 
