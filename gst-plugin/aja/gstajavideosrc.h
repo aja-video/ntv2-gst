@@ -40,6 +40,12 @@ G_BEGIN_DECLS
 typedef struct _GstAjaVideoSrc GstAjaVideoSrc;
 typedef struct _GstAjaVideoSrcClass GstAjaVideoSrcClass;
 
+typedef enum {
+  SIGNAL_STATE_UNKNOWN,
+  SIGNAL_STATE_LOST,
+  SIGNAL_STATE_AVAILABLE,
+} GstAjaSignalState;
+
 struct _GstAjaVideoSrc
 {
     GstPushSrc                  parent;
@@ -65,7 +71,7 @@ struct _GstAjaVideoSrc
     gboolean                    output_cc;
     gint			last_cc_vbi_line;
 
-    gboolean have_signal;
+    GstAjaSignalState signal_state;
     GstClockTime discont_time;
     guint64 discont_frame_number;
 
