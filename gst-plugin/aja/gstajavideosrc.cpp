@@ -1260,6 +1260,12 @@ retry:
   GST_BUFFER_DURATION (*buffer) = gst_util_uint64_scale_int (GST_SECOND,
       src->input->mode->fps_d, src->input->mode->fps_n);
 
+  if (src->input->mode->isInterlaced) {
+    GST_BUFFER_FLAG_SET (*buffer, GST_VIDEO_BUFFER_FLAG_INTERLACED);
+    if (src->input->mode->isTff)
+      GST_BUFFER_FLAG_SET (*buffer, GST_VIDEO_BUFFER_FLAG_TFF);
+  }
+
   if (timecode_valid) {
     uint8_t hours, minutes, seconds, frames;
     GstVideoTimeCodeFlags flags = GST_VIDEO_TIME_CODE_FLAGS_NONE;
