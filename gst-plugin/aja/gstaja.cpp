@@ -352,6 +352,7 @@ gst_aja_mode_get_template_caps_raw (void)
   caps = gst_caps_new_empty ();
   for (i = 1; i < (int) G_N_ELEMENTS (modesRaw); i++) {
     s = gst_aja_mode_get_structure_raw ((GstAjaModeRawEnum) i);
+    gst_structure_remove_field (s, "colorimetry");
     gst_caps_append_structure (caps, s);
   }
 

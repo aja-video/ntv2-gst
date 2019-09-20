@@ -61,6 +61,10 @@ typedef struct
     uint64_t        timeStamp;              /// Time stamp of video data
     bool            lastFrame;              /// Indicates last captured frame
     bool            haveSignal;             /// true if we actually have signal
+
+    uint8_t         transferCharacteristics; /// SDR-TV (0), HLG (1), PQ (2), unspecified (3)
+    uint8_t         colorimetry;             /// Rec 709 (0), VANC (1), UHDTV (2), unspecified (3)
+    bool            fullRange;               /// 0-255 if true, 16-235 otherwise
 } AjaVideoBuff;
 
 
