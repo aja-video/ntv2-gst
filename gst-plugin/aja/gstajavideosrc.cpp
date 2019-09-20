@@ -1201,13 +1201,50 @@ retry:
     goto retry;
   }
 
-  if (src->modeEnum != f->mode || !gst_pad_has_current_caps (GST_BASE_SRC_PAD (src))) {
+  if (src->modeEnum != f->mode ||
+      src->transferCharacteristics != f->video_buff->transferCharacteristics ||
+      src->colorimetry != f->video_buff->colorimetry ||
+      src->fullRange != f->video_buff->fullRange ||
+      !gst_pad_has_current_caps (GST_BASE_SRC_PAD (src))) {
     if (src->modeEnum != f->mode)
     GST_DEBUG_OBJECT (src, "Mode changed from %d to %d", src->modeEnum, f->mode);
     src->modeEnum = f->mode;
+    src->transferCharacteristics = f->video_buff->transferCharacteristics;
+    src->colorimetry = f->video_buff->colorimetry;
+    src->fullRange = f->video_buff->fullRange;
     g_mutex_unlock (&src->lock);
     caps = gst_aja_mode_get_caps_raw (f->mode);
     gst_video_info_from_caps (&src->info, caps);
+    // TODO: Work with videoinfo instead of caps
+    gst_caps_unref (caps);
+#if GST_CHECK_VERSION(1,17,0)
+    if (src->transferCharacteristics == 0) {
+      // SDR-TV is the default
+    } else if (src->transferCharacteristics == 1) {
+      src->info.colorimetry.transfer = GST_VIDEO_TRANSFER_SMPTE2084;
+    } else if (src->transferCharacteristics == 2) {
+      src->info.colorimetry.transfer = GST_VIDEO_TRANSFER_ARIB_STD_B67;
+    }
+#endif
+    if (src->colorimetry == 0) {
+      if (src->info.height < 720) {
+        src->info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT601;
+        src->info.colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_SMPTE170M;
+      } else {
+        src->info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT709;
+        src->info.colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_BT709;
+      }
+    } else if (src->colorimetry == 2) {
+      src->info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT2020;
+      src->info.colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_BT2020;
+    } else {
+      if (src->transferCharacteristics == 1 || src->transferCharacteristics == 2) {
+        src->info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT2020;
+        src->info.colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_BT2020;
+      }
+    }
+    src->info.colorimetry.range = src->fullRange ? GST_VIDEO_COLOR_RANGE_0_255 : GST_VIDEO_COLOR_RANGE_16_235;
+    caps = gst_video_info_to_caps (&src->info);
     gst_base_src_set_caps (GST_BASE_SRC_CAST (bsrc), caps);
     gst_element_post_message (GST_ELEMENT_CAST (src),
         gst_message_new_latency (GST_OBJECT_CAST (src)));

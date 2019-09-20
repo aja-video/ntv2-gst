@@ -1575,6 +1575,116 @@ NTV2GstAV::ACInputWorker (void)
         pVideoData->timeCodeValid = true;
       }
 
+      pVideoData->transferCharacteristics = 3;
+      pVideoData->colorimetry = 3;
+      pVideoData->fullRange = FALSE;
+      if (mVideoSource == NTV2_INPUTSOURCE_SDI1 && vpidA != 0) {
+        if (vpidA & 0x80) {
+          switch (vpidA) {
+            case 0x81: // ST 352
+            case 0x82: // ST 352
+            case 0x83: // ST 352
+            case 0x86: // ST 352
+            case 0x84: // ST 292-1
+            case 0x8B: // ST 425-1
+            case 0x8D: // ST 425-1
+            case 0xB1: // ST 292-2
+            case 0x8E: // ST 425-2
+            case 0x8F: // ST 425-2
+            case 0x90: // ST 435-1
+            case 0x91: // ST 425-4
+            case 0x92: // ST 425-4
+            case 0x93: // ST 425-4
+            case 0xA0: // ST 435-1
+            case 0xB0: // ST 2047-2
+            case 0xB2: // ST 2047-4
+            case 0xB3: // ST 2048-3
+            case 0xB4: // RDD 22
+            case 0xB5: // RDD 22
+              // No colorimetry/transfer/range information
+              break;
+            case 0x85: // ST 292-1
+            case 0x8C: // ST 425-1
+            {
+              guint colorimetry = (vpidA >> 12) & 0x09;
+
+              pVideoData->transferCharacteristics = (vpidA >> 20) & 0x03;
+              if (colorimetry == 0x00)
+                pVideoData->colorimetry = 0;
+              else if (colorimetry == 0x01)
+                pVideoData->colorimetry = 1;
+              else if (colorimetry == 0x08)
+                pVideoData->colorimetry = 2;
+              else if (colorimetry == 0x09)
+                pVideoData->colorimetry = 3;
+
+              pVideoData->fullRange = (vpidA & 0x02) == 0x02;
+              break;
+            }
+              break;
+            case 0x87: // ST 372
+            case 0x8A: // ST 425-1
+            case 0x95: // ST 425-3
+            case 0x96: // ST 425-3
+            case 0x98: // ST 425-5
+            case 0x9A: // ST 425-6
+            case 0x9B: // ST 425-6
+            {
+              guint colorimetry = (vpidA >> 12) & 0x09;
+
+              pVideoData->transferCharacteristics = (vpidA >> 20) & 0x03;
+              if (colorimetry == 0x00)
+                pVideoData->colorimetry = 0;
+              else if (colorimetry == 0x01)
+                pVideoData->colorimetry = 1;
+              else if (colorimetry == 0x08)
+                pVideoData->colorimetry = 2;
+              else if (colorimetry == 0x09)
+                pVideoData->colorimetry = 3;
+
+              pVideoData->fullRange = (vpidA & 0x03) == 0x00 || (vpidA & 0x03) == 0x03;
+              break;
+            }
+            case 0x88: // ST 425-1
+            case 0x89: // ST 425-1
+            case 0x94: // ST 425-3
+            case 0x97: // ST 425-5
+            case 0x99: // ST 425-6
+            case 0xC0: // ST 2081-10
+            case 0xC2: // ST 2081-11
+            case 0xF3: // ST 2081-11
+            case 0xC4: // ST 2081-12
+            case 0xC5: // ST 2081-12
+            case 0xCE: // ST 2082-10
+            case 0xCF: // ST 2082-10
+            case 0xD0: // ST 2082-11
+            case 0xD1: // ST 2082-11
+            case 0xD2: // ST 2082-12
+            case 0xD3: // ST 2082-12
+              pVideoData->transferCharacteristics = (vpidA >> 20) & 0x03;
+              pVideoData->colorimetry = (vpidA >> 12) & 0x03;
+              pVideoData->fullRange = (vpidA & 0x03) == 0x00 || (vpidA & 0x03) == 0x03;
+              break;
+            case 0xA1: // ST 2036-3
+            case 0xA2: // ST 2036-3
+            case 0xA5: // ST 2036-4
+            case 0xA6: // ST 2036-4
+            case 0xC1: // ST 2081-10
+              pVideoData->transferCharacteristics = (vpidA >> 20) & 0x03;
+              pVideoData->colorimetry = 3;
+              pVideoData->fullRange = (vpidA & 0x03) == 0x00 || (vpidA & 0x03) == 0x03;
+              break;
+            default:
+              break;
+          }
+        } else {
+          // Historical payload identifiers
+          pVideoData->transferCharacteristics = 3;
+          pVideoData->colorimetry = 3;
+          pVideoData->fullRange = FALSE;
+        }
+      }
+
       if (mWithInfo) {
         // get picture and additional data pointers
         HevcPictureInfo *pInfo = (HevcPictureInfo *) pVideoData->pInfoBuffer;
