@@ -1221,9 +1221,9 @@ retry:
     if (src->transferCharacteristics == 0) {
       // SDR-TV is the default
     } else if (src->transferCharacteristics == 1) {
-      src->info.colorimetry.transfer = GST_VIDEO_TRANSFER_SMPTE2084;
-    } else if (src->transferCharacteristics == 2) {
       src->info.colorimetry.transfer = GST_VIDEO_TRANSFER_ARIB_STD_B67;
+    } else if (src->transferCharacteristics == 2) {
+      src->info.colorimetry.transfer = GST_VIDEO_TRANSFER_SMPTE2084;
     }
 #endif
     if (src->colorimetry == 0) {

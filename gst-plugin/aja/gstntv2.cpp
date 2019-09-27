@@ -1579,8 +1579,8 @@ NTV2GstAV::ACInputWorker (void)
       pVideoData->colorimetry = 3;
       pVideoData->fullRange = FALSE;
       if (mVideoSource == NTV2_INPUTSOURCE_SDI1 && vpidA != 0) {
-        if (vpidA & 0x80) {
-          switch (vpidA) {
+        if (vpidA & 0x80000000) {
+          switch (vpidA >> 24) {
             case 0x81: // ST 352
             case 0x82: // ST 352
             case 0x83: // ST 352
