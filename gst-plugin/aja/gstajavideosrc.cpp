@@ -1230,9 +1230,12 @@ retry:
       if (src->info.height < 720) {
         src->info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT601;
         src->info.colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_SMPTE170M;
-      } else {
+      } else if (src->info.height < 2160) {
         src->info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT709;
         src->info.colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_BT709;
+      } else {
+        src->info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT2020;
+        src->info.colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_BT2020;
       }
     } else if (src->colorimetry == 2) {
       src->info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT2020;
