@@ -184,6 +184,9 @@ typedef enum {
 #define GST_TYPE_AJA_VIDEO_INPUT_MODE (gst_aja_video_input_mode_get_type ())
 GType gst_aja_video_input_mode_get_type (void);
 
+#define GST_TYPE_AJA_SDI_INPUT_MODE (gst_aja_sdi_input_mode_get_type ())
+GType gst_aja_sdi_input_mode_get_type (void);
+
 typedef enum {
   GST_AJA_TIMECODE_MODE_VITC1,
   GST_AJA_TIMECODE_MODE_VITC2,
@@ -226,7 +229,6 @@ struct _GstAjaMode
     int                     fps_d;
     gboolean                isInterlaced;
     gboolean                is422;
-    gboolean                isQuad;
     int                     par_n;
     int                     par_d;
     gboolean                isTff;

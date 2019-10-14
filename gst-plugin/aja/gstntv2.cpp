@@ -140,7 +140,7 @@ AJAStatus
     const bool inIs422,
     const bool inIsAuto,
     const bool inHevcOutput,
-    const bool inQuadMode,
+    const SDIInputMode inSDIInputMode,
     const NTV2TCIndex inTimeCode,
     const bool inInfoData,
     const bool inCaptureTall,
@@ -157,92 +157,94 @@ AJAStatus
   mTimecodeMode = inTimeCode;
   mWithInfo = inInfoData;
   mCaptureTall = inCaptureTall;
-  mPassthrough = mPassthrough;
+  mPassthrough = inPassthrough;
+  mSDIInputMode = inSDIInputMode;
 
-  // If the device can do 12g routing it won't be able to do quad/2SI and
-  // we simply switch to 12g routing for all quad modes (aka all 4k modes).
-  //
-  // We also have to switch from the 4x mode to the corresponding 12g moide
-  //
-  // TODO: The mode selection and parameters should be cleaned up at some point
-  // to handle this more cleanly, and also account for quad/2SI, dual-link/3g,
-  // A/B HD modes, different color formats, ...
-  if (inQuadMode && mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
-    mQuad = inQuadMode;
-    mVideoFormat = inVideoFormat;
-  } else if (inQuadMode && ::NTV2DeviceCanDo12gRouting(mDeviceID)) {
-    mQuad = false;
+  // Map input video modes. For quad-link and UHD/4k HDMI we need to map
+  // to 4x modes, otherwise keep mode as is
+  mQuad = true;
+  if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD ||
+      mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI ||
+      mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
     switch (inVideoFormat) {
-      case NTV2_FORMAT_4x1920x1080p_2398:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_2398;
+      case NTV2_FORMAT_3840x2160p_2398:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_2398;
         break;
-      case NTV2_FORMAT_4x1920x1080p_2400:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_2400;
+      case NTV2_FORMAT_3840x2160p_2400:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_2400;
         break;
-      case NTV2_FORMAT_4x1920x1080p_2500:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_2500;
+      case NTV2_FORMAT_3840x2160p_2500:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_2500;
         break;
-      case NTV2_FORMAT_4x1920x1080p_2997:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_2997;
+      case NTV2_FORMAT_3840x2160p_2997:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_2997;
         break;
-      case NTV2_FORMAT_4x1920x1080p_3000:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_3000;
+      case NTV2_FORMAT_3840x2160p_3000:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_3000;
         break;
-      case NTV2_FORMAT_4x1920x1080p_5000:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_5000;
+      case NTV2_FORMAT_3840x2160p_5000:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_5000;
         break;
-      case NTV2_FORMAT_4x1920x1080p_5994:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_5994;
+      case NTV2_FORMAT_3840x2160p_5994:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_5994;
         break;
-      case NTV2_FORMAT_4x1920x1080p_6000:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_6000;
+      case NTV2_FORMAT_3840x2160p_6000:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_6000;
         break;
-      case NTV2_FORMAT_4x2048x1080p_2398:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_2398;
+      case NTV2_FORMAT_4096x2160p_2398:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_2398;
         break;
-      case NTV2_FORMAT_4x2048x1080p_2400:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_2400;
+      case NTV2_FORMAT_4096x2160p_2400:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_2400;
         break;
-      case NTV2_FORMAT_4x2048x1080p_2500:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_2500;
+      case NTV2_FORMAT_4096x2160p_2500:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_2500;
         break;
-      case NTV2_FORMAT_4x2048x1080p_2997:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_2997;
+      case NTV2_FORMAT_4096x2160p_2997:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_2997;
         break;
-      case NTV2_FORMAT_4x2048x1080p_3000:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_3000;
+      case NTV2_FORMAT_4096x2160p_3000:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_3000;
         break;
-      case NTV2_FORMAT_4x2048x1080p_4795:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_4795;
+      case NTV2_FORMAT_4096x2160p_4795:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_4795;
         break;
-      case NTV2_FORMAT_4x2048x1080p_4800:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_4800;
+      case NTV2_FORMAT_4096x2160p_4800:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_4800;
         break;
-      case NTV2_FORMAT_4x2048x1080p_5000:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_5000;
+      case NTV2_FORMAT_4096x2160p_5000:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_5000;
         break;
-      case NTV2_FORMAT_4x2048x1080p_5994:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_5994;
+      case NTV2_FORMAT_4096x2160p_5994:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_5994;
         break;
-      case NTV2_FORMAT_4x2048x1080p_6000:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_6000;
+      case NTV2_FORMAT_4096x2160p_6000:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_6000;
         break;
-      case NTV2_FORMAT_4x2048x1080p_11988:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_11988;
+      case NTV2_FORMAT_4096x2160p_11988:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_11988;
         break;
-      case NTV2_FORMAT_4x2048x1080p_12000:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_12000;
+      case NTV2_FORMAT_4096x2160p_12000:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_12000;
         break;
       default:
-        g_assert_not_reached ();
+        if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD ||
+            mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
+          GST_ERROR ("Quad mode requires UHD/4k resolution");
+          return AJA_STATUS_FAIL;
+        }
+
+        // Ok for HDMI
+        mVideoFormat = inVideoFormat;
+        mQuad = false;
         break;
     }
   } else {
-    mQuad = inQuadMode;
     mVideoFormat = inVideoFormat;
+    mQuad = false;
   }
 
-  if (mQuad) {
+  if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD || mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
     if (mInputChannel != NTV2_CHANNEL1 && mInputChannel != NTV2_CHANNEL5) {
       GST_ERROR ("Quad mode requires channel 1 or 5");
       return AJA_STATUS_FAIL;
@@ -258,7 +260,9 @@ AJAStatus
       return AJA_STATUS_SUCCESS;
 
     //  Get SDI input format
-    status = DetermineInputFormat (mInputChannel, mQuad, mVideoFormat);
+    status = DetermineInputFormat (mInputChannel,
+        mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD || mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI,
+        mVideoFormat);
     if (AJA_FAILURE (status))
       return status;
 
@@ -652,13 +656,22 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
   mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
 
-  if (mQuad) {
+  if (mQuad && mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
     mDevice.Set4kSquaresEnable(true, (NTV2Channel) mInputChannel);
-    if (mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
+    mDevice.SetTsiFrameEnable(true, (NTV2Channel) mInputChannel);
+  } else if (mQuad) {
+    if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD) {
+      mDevice.Set4kSquaresEnable(true, (NTV2Channel) mInputChannel);
+      mDevice.SetTsiFrameEnable(false, (NTV2Channel) mInputChannel);
+    } else if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
+      mDevice.Set4kSquaresEnable(false, (NTV2Channel) mInputChannel);
       mDevice.SetTsiFrameEnable(true, (NTV2Channel) mInputChannel);
     } else {
-      mDevice.SetTsiFrameEnable(false, (NTV2Channel) mInputChannel);
+      g_assert_not_reached ();
     }
+  } else {
+    mDevice.Set4kSquaresEnable(false, (NTV2Channel) mInputChannel);
+    mDevice.SetTsiFrameEnable(false, (NTV2Channel) mInputChannel);
   }
 
   mDevice.EnableChannel (mInputChannel);
@@ -804,9 +817,14 @@ AJAStatus NTV2GstAV::SetupVideo (void)
       break;
   }
 
-  // Special-case for UHD HDMI
+  // Special-case for UHD HDMI and SDI TSI
   if (mQuad && mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
     inputIdentifier = NTV2_Xpt425Mux1AYUV;
+  } else if (mQuad && mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
+    if (mInputChannel == NTV2_CHANNEL1)
+      inputIdentifier = NTV2_Xpt425Mux1AYUV;
+    else
+      inputIdentifier = NTV2_Xpt425Mux3AYUV;
   }
 
   // Add to the mapping to the router for this channel
@@ -864,6 +882,28 @@ AJAStatus NTV2GstAV::SetupVideo (void)
         router.AddConnection(NTV2_Xpt425Mux1BInput, NTV2_XptHDMIIn1Q2);
         router.AddConnection(NTV2_Xpt425Mux2AInput, NTV2_XptHDMIIn1Q3);
         router.AddConnection(NTV2_Xpt425Mux2BInput, NTV2_XptHDMIIn1Q4);
+    } else if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
+      if (mInputChannel == NTV2_CHANNEL1) {
+        router.AddConnection(NTV2_XptFrameBuffer1BInput, NTV2_Xpt425Mux1BYUV);
+        router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_Xpt425Mux2AYUV);
+        router.AddConnection(NTV2_XptFrameBuffer2BInput, NTV2_Xpt425Mux2BYUV);
+
+        router.AddConnection(NTV2_Xpt425Mux1AInput, NTV2_XptSDIIn1);
+        router.AddConnection(NTV2_Xpt425Mux1BInput, NTV2_XptSDIIn2);
+        router.AddConnection(NTV2_Xpt425Mux2AInput, NTV2_XptSDIIn3);
+        router.AddConnection(NTV2_Xpt425Mux2BInput, NTV2_XptSDIIn4);
+      } else {
+        router.AddConnection(NTV2_XptFrameBuffer5BInput, NTV2_Xpt425Mux3BYUV);
+        router.AddConnection(NTV2_XptFrameBuffer6Input, NTV2_Xpt425Mux4AYUV);
+        router.AddConnection(NTV2_XptFrameBuffer6BInput, NTV2_Xpt425Mux4BYUV);
+
+        router.AddConnection(NTV2_Xpt425Mux3AInput, NTV2_XptSDIIn5);
+        router.AddConnection(NTV2_Xpt425Mux3BInput, NTV2_XptSDIIn6);
+        router.AddConnection(NTV2_Xpt425Mux4AInput, NTV2_XptSDIIn7);
+        router.AddConnection(NTV2_Xpt425Mux4BInput, NTV2_XptSDIIn8);
+      }
+      mOutputChannel = NTV2_CHANNEL5;
+      mEncodeChannel = M31_CH0;
     } else {
       if (mInputChannel == NTV2_CHANNEL1) {
         router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
