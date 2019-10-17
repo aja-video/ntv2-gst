@@ -1567,7 +1567,8 @@ NTV2GstAV::ACInputWorker (void)
       pVideoData->timeCodeValid = false;
       NTV2_RP188 timeCode;
       if (mInputTransferStruct.acTransferStatus.
-          acFrameStamp.GetInputTimeCode (timeCode, tcIndex)) {
+          acFrameStamp.GetInputTimeCode (timeCode, tcIndex) &&
+          (timeCode.fDBB != 0xffffffff || timeCode.fLo != 0xffffffff || timeCode.fHi != 0xffffffff)) {
         // get the sdi input anc data
         pVideoData->timeCodeDBB = timeCode.fDBB;
         pVideoData->timeCodeLow = timeCode.fLo;
