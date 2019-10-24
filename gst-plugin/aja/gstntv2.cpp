@@ -6,6 +6,8 @@
 **/
 
 #include <stdio.h>
+#include <semaphore.h>
+#include <fcntl.h>
 
 #include "gstntv2.h"
 #include "gstaja.h"
@@ -126,11 +128,44 @@ AJAStatus NTV2GstAV::Close (void)
   AJAStatus
   status (AJA_STATUS_SUCCESS);
 
-  mDeviceID = DEVICE_ID_NOTFOUND;;
+  mDeviceID = DEVICE_ID_NOTFOUND;
 
   return status;
 }
 
+static gpointer
+init_setup_mutex (gpointer data) {
+  sem_t *s = SEM_FAILED;
+  s = sem_open ("/gstreamer-ajavideosrc-sem", O_CREAT, S_IRUSR|S_IWUSR, 1);
+  if (s == SEM_FAILED) {
+    g_critical ("Failed to create SHM semaphore for GStreamer AJA video source: %s", g_strerror (errno));
+  }
+  return s;
+}
+
+static sem_t *
+get_setup_mutex (void) {
+  static GOnce once = G_ONCE_INIT;
+
+  g_once (&once, init_setup_mutex, NULL);
+
+  return (sem_t *) once.retval;
+}
+
+class ShmMutexLocker {
+  public:
+    ShmMutexLocker() {
+      sem_t *s = get_setup_mutex ();
+      if (s != SEM_FAILED)
+        sem_wait (s);
+    }
+
+    ~ShmMutexLocker() {
+      sem_t *s = get_setup_mutex ();
+      if (s != SEM_FAILED)
+        sem_post (s);
+    }
+};
 
 AJAStatus
     NTV2GstAV::Init (const M31VideoPreset inPreset,
@@ -147,6 +182,8 @@ AJAStatus
     const bool inPassthrough)
 {
   AJAStatus status (AJA_STATUS_SUCCESS);
+
+  ShmMutexLocker locker;
 
   mPreset = inPreset;
   mVideoSource = inInputSource;
