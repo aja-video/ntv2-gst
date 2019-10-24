@@ -780,6 +780,9 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   NTV2InputCrosspointID fbfInputSelect;
   CNTV2SignalRouter router;
 
+  // Get old router
+  mDevice.GetRouting(router);
+
   // Get corresponding input select entries for the channel
   switch (mInputChannel) {
     default:
@@ -815,6 +818,110 @@ AJAStatus NTV2GstAV::SetupVideo (void)
       mEncodeChannel = M31_CH3; //FIXME
       fbfInputSelect = NTV2_XptFrameBuffer8Input;
       break;
+  }
+
+  // Disconnect anything related to the input channel(s) and other connectors
+  // we would be using for any other mode for those input channel(s).
+  if (mQuad && mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
+    // Need to disconnect the 4 inputs corresponding to this channel from
+    // their framebuffers/muxers, and muxers from their framebuffers
+    NTV2ActualConnections connections = router.GetConnections();
+
+    for (NTV2ActualConnectionsConstIter iter = connections.begin(); iter != connections.end(); iter++) {
+      if (iter->first == NTV2_XptFrameBuffer1Input ||
+          iter->first == NTV2_XptFrameBuffer1BInput ||
+          iter->first == NTV2_XptFrameBuffer2Input ||
+          iter->first == NTV2_XptFrameBuffer2BInput ||
+          iter->second == NTV2_Xpt425Mux1AYUV ||
+          iter->second == NTV2_Xpt425Mux1BYUV ||
+          iter->second == NTV2_Xpt425Mux2AYUV ||
+          iter->second == NTV2_Xpt425Mux2BYUV ||
+          iter->first == NTV2_Xpt425Mux1AInput ||
+          iter->first == NTV2_Xpt425Mux1BInput ||
+          iter->first == NTV2_Xpt425Mux2AInput ||
+          iter->first == NTV2_Xpt425Mux2BInput ||
+          iter->second == NTV2_XptHDMIIn1 ||
+          iter->second == NTV2_XptHDMIIn1Q2 ||
+          iter->second == NTV2_XptHDMIIn1Q3 ||
+          iter->second == NTV2_XptHDMIIn1Q4)
+        router.RemoveConnection(iter->first, iter->second);
+    }
+  } else if (mQuad && mInputChannel == NTV2_CHANNEL1) {
+    // Need to disconnect the 4 inputs corresponding to this channel from
+    // their framebuffers/muxers, and muxers from their framebuffers
+    NTV2ActualConnections connections = router.GetConnections();
+
+    for (NTV2ActualConnectionsConstIter iter = connections.begin(); iter != connections.end(); iter++) {
+      if (iter->first == NTV2_XptFrameBuffer1Input ||
+          iter->first == NTV2_XptFrameBuffer1BInput ||
+          iter->first == NTV2_XptFrameBuffer2Input ||
+          iter->first == NTV2_XptFrameBuffer2BInput ||
+          iter->second == NTV2_Xpt425Mux1AYUV ||
+          iter->second == NTV2_Xpt425Mux1BYUV ||
+          iter->second == NTV2_Xpt425Mux2AYUV ||
+          iter->second == NTV2_Xpt425Mux2BYUV ||
+          iter->first == NTV2_Xpt425Mux1AInput ||
+          iter->first == NTV2_Xpt425Mux1BInput ||
+          iter->first == NTV2_Xpt425Mux2AInput ||
+          iter->first == NTV2_Xpt425Mux2BInput ||
+          iter->second == NTV2_XptSDIIn1 ||
+          iter->second == NTV2_XptSDIIn2 ||
+          iter->second == NTV2_XptSDIIn3 ||
+          iter->second == NTV2_XptSDIIn4 ||
+          iter->first == NTV2_XptFrameBuffer1Input ||
+          iter->first == NTV2_XptFrameBuffer2Input ||
+          iter->first == NTV2_XptFrameBuffer3Input ||
+          iter->first == NTV2_XptFrameBuffer4Input
+          )
+        router.RemoveConnection(iter->first, iter->second);
+    }
+  } else if (mQuad) {
+    // Need to disconnect the 4 inputs corresponding to this channel from
+    // their framebuffers/muxers, and muxers from their framebuffers
+    NTV2ActualConnections connections = router.GetConnections();
+
+    for (NTV2ActualConnectionsConstIter iter = connections.begin(); iter != connections.end(); iter++) {
+      if (iter->first == NTV2_XptFrameBuffer5Input ||
+          iter->first == NTV2_XptFrameBuffer5BInput ||
+          iter->first == NTV2_XptFrameBuffer6Input ||
+          iter->first == NTV2_XptFrameBuffer6BInput ||
+          iter->second == NTV2_Xpt425Mux3AYUV ||
+          iter->second == NTV2_Xpt425Mux3BYUV ||
+          iter->second == NTV2_Xpt425Mux4AYUV ||
+          iter->second == NTV2_Xpt425Mux4BYUV ||
+          iter->first == NTV2_Xpt425Mux3AInput ||
+          iter->first == NTV2_Xpt425Mux3BInput ||
+          iter->first == NTV2_Xpt425Mux4AInput ||
+          iter->first == NTV2_Xpt425Mux4BInput ||
+          iter->second == NTV2_XptSDIIn5 ||
+          iter->second == NTV2_XptSDIIn6 ||
+          iter->second == NTV2_XptSDIIn7 ||
+          iter->second == NTV2_XptSDIIn8 ||
+          iter->first == NTV2_XptFrameBuffer5Input ||
+          iter->first == NTV2_XptFrameBuffer6Input ||
+          iter->first == NTV2_XptFrameBuffer7Input ||
+          iter->first == NTV2_XptFrameBuffer8Input)
+        router.RemoveConnection(iter->first, iter->second);
+    }
+  } else {
+    // Need to only disconnect the input and its framebuffer
+    NTV2ActualConnections connections = router.GetConnections();
+
+    for (NTV2ActualConnectionsConstIter iter = connections.begin(); iter != connections.end(); iter++) {
+      if (iter->first == fbfInputSelect ||
+          iter->second == inputIdentifier)
+        router.RemoveConnection(iter->first, iter->second);
+
+      if (((inputIdentifier == NTV2_XptSDIIn6 || inputIdentifier == NTV2_XptSDIIn8) &&
+          iter->first == NTV2_XptFrameBuffer6BInput) ||
+          ((inputIdentifier == NTV2_XptSDIIn5 || inputIdentifier == NTV2_XptSDIIn6) &&
+          iter->first == NTV2_XptFrameBuffer5BInput) ||
+          ((inputIdentifier == NTV2_XptSDIIn4 || inputIdentifier == NTV2_XptSDIIn2) &&
+          iter->first == NTV2_XptFrameBuffer2BInput) ||
+          ((inputIdentifier == NTV2_XptSDIIn1 || inputIdentifier == NTV2_XptSDIIn2) &&
+          iter->first == NTV2_XptFrameBuffer1BInput))
+        router.RemoveConnection(iter->first, iter->second);
+    }
   }
 
   // Special-case for UHD HDMI and SDI TSI
@@ -960,7 +1067,7 @@ AJAStatus NTV2GstAV::SetupVideo (void)
     oldRouter.Print(os);
     GST_DEBUG ("Previous routing:\n%s", os.str().c_str());
   }
-  mDevice.ApplySignalRoute (router, false);
+  mDevice.ApplySignalRoute (router, true);
   {
     stringstream os;
     CNTV2SignalRouter currentRouter;
