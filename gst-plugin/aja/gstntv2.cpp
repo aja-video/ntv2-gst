@@ -953,7 +953,21 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   }
 
   // Enable routes
+  {
+    stringstream os;
+    CNTV2SignalRouter oldRouter;
+    mDevice.GetRouting(oldRouter);
+    oldRouter.Print(os);
+    GST_DEBUG ("Previous routing:\n%s", os.str().c_str());
+  }
   mDevice.ApplySignalRoute (router, false);
+  {
+    stringstream os;
+    CNTV2SignalRouter currentRouter;
+    mDevice.GetRouting(currentRouter);
+    currentRouter.Print(os);
+    GST_DEBUG ("New routing:\n%s", os.str().c_str());
+  }
 
   //    Set the device reference to the input...
   //    FIXME
