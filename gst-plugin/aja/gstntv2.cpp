@@ -6,6 +6,8 @@
 **/
 
 #include <stdio.h>
+#include <semaphore.h>
+#include <fcntl.h>
 
 #include "gstntv2.h"
 #include "gstaja.h"
@@ -126,11 +128,44 @@ AJAStatus NTV2GstAV::Close (void)
   AJAStatus
   status (AJA_STATUS_SUCCESS);
 
-  mDeviceID = DEVICE_ID_NOTFOUND;;
+  mDeviceID = DEVICE_ID_NOTFOUND;
 
   return status;
 }
 
+static gpointer
+init_setup_mutex (gpointer data) {
+  sem_t *s = SEM_FAILED;
+  s = sem_open ("/gstreamer-ajavideosrc-sem", O_CREAT, S_IRUSR|S_IWUSR, 1);
+  if (s == SEM_FAILED) {
+    g_critical ("Failed to create SHM semaphore for GStreamer AJA video source: %s", g_strerror (errno));
+  }
+  return s;
+}
+
+static sem_t *
+get_setup_mutex (void) {
+  static GOnce once = G_ONCE_INIT;
+
+  g_once (&once, init_setup_mutex, NULL);
+
+  return (sem_t *) once.retval;
+}
+
+class ShmMutexLocker {
+  public:
+    ShmMutexLocker() {
+      sem_t *s = get_setup_mutex ();
+      if (s != SEM_FAILED)
+        sem_wait (s);
+    }
+
+    ~ShmMutexLocker() {
+      sem_t *s = get_setup_mutex ();
+      if (s != SEM_FAILED)
+        sem_post (s);
+    }
+};
 
 AJAStatus
     NTV2GstAV::Init (const M31VideoPreset inPreset,
@@ -140,13 +175,15 @@ AJAStatus
     const bool inIs422,
     const bool inIsAuto,
     const bool inHevcOutput,
-    const bool inQuadMode,
+    const SDIInputMode inSDIInputMode,
     const NTV2TCIndex inTimeCode,
     const bool inInfoData,
     const bool inCaptureTall,
     const bool inPassthrough)
 {
   AJAStatus status (AJA_STATUS_SUCCESS);
+
+  ShmMutexLocker locker;
 
   mPreset = inPreset;
   mVideoSource = inInputSource;
@@ -157,92 +194,94 @@ AJAStatus
   mTimecodeMode = inTimeCode;
   mWithInfo = inInfoData;
   mCaptureTall = inCaptureTall;
-  mPassthrough = mPassthrough;
+  mPassthrough = inPassthrough;
+  mSDIInputMode = inSDIInputMode;
 
-  // If the device can do 12g routing it won't be able to do quad/2SI and
-  // we simply switch to 12g routing for all quad modes (aka all 4k modes).
-  //
-  // We also have to switch from the 4x mode to the corresponding 12g moide
-  //
-  // TODO: The mode selection and parameters should be cleaned up at some point
-  // to handle this more cleanly, and also account for quad/2SI, dual-link/3g,
-  // A/B HD modes, different color formats, ...
-  if (inQuadMode && mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
-    mQuad = inQuadMode;
-    mVideoFormat = inVideoFormat;
-  } else if (inQuadMode && ::NTV2DeviceCanDo12gRouting(mDeviceID)) {
-    mQuad = false;
+  // Map input video modes. For quad-link and UHD/4k HDMI we need to map
+  // to 4x modes, otherwise keep mode as is
+  mQuad = true;
+  if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD ||
+      mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI ||
+      mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
     switch (inVideoFormat) {
-      case NTV2_FORMAT_4x1920x1080p_2398:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_2398;
+      case NTV2_FORMAT_3840x2160p_2398:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_2398;
         break;
-      case NTV2_FORMAT_4x1920x1080p_2400:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_2400;
+      case NTV2_FORMAT_3840x2160p_2400:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_2400;
         break;
-      case NTV2_FORMAT_4x1920x1080p_2500:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_2500;
+      case NTV2_FORMAT_3840x2160p_2500:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_2500;
         break;
-      case NTV2_FORMAT_4x1920x1080p_2997:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_2997;
+      case NTV2_FORMAT_3840x2160p_2997:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_2997;
         break;
-      case NTV2_FORMAT_4x1920x1080p_3000:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_3000;
+      case NTV2_FORMAT_3840x2160p_3000:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_3000;
         break;
-      case NTV2_FORMAT_4x1920x1080p_5000:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_5000;
+      case NTV2_FORMAT_3840x2160p_5000:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_5000;
         break;
-      case NTV2_FORMAT_4x1920x1080p_5994:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_5994;
+      case NTV2_FORMAT_3840x2160p_5994:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_5994;
         break;
-      case NTV2_FORMAT_4x1920x1080p_6000:
-        mVideoFormat = NTV2_FORMAT_3840x2160p_6000;
+      case NTV2_FORMAT_3840x2160p_6000:
+        mVideoFormat = NTV2_FORMAT_4x1920x1080p_6000;
         break;
-      case NTV2_FORMAT_4x2048x1080p_2398:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_2398;
+      case NTV2_FORMAT_4096x2160p_2398:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_2398;
         break;
-      case NTV2_FORMAT_4x2048x1080p_2400:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_2400;
+      case NTV2_FORMAT_4096x2160p_2400:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_2400;
         break;
-      case NTV2_FORMAT_4x2048x1080p_2500:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_2500;
+      case NTV2_FORMAT_4096x2160p_2500:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_2500;
         break;
-      case NTV2_FORMAT_4x2048x1080p_2997:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_2997;
+      case NTV2_FORMAT_4096x2160p_2997:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_2997;
         break;
-      case NTV2_FORMAT_4x2048x1080p_3000:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_3000;
+      case NTV2_FORMAT_4096x2160p_3000:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_3000;
         break;
-      case NTV2_FORMAT_4x2048x1080p_4795:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_4795;
+      case NTV2_FORMAT_4096x2160p_4795:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_4795;
         break;
-      case NTV2_FORMAT_4x2048x1080p_4800:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_4800;
+      case NTV2_FORMAT_4096x2160p_4800:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_4800;
         break;
-      case NTV2_FORMAT_4x2048x1080p_5000:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_5000;
+      case NTV2_FORMAT_4096x2160p_5000:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_5000;
         break;
-      case NTV2_FORMAT_4x2048x1080p_5994:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_5994;
+      case NTV2_FORMAT_4096x2160p_5994:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_5994;
         break;
-      case NTV2_FORMAT_4x2048x1080p_6000:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_6000;
+      case NTV2_FORMAT_4096x2160p_6000:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_6000;
         break;
-      case NTV2_FORMAT_4x2048x1080p_11988:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_11988;
+      case NTV2_FORMAT_4096x2160p_11988:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_11988;
         break;
-      case NTV2_FORMAT_4x2048x1080p_12000:
-        mVideoFormat = NTV2_FORMAT_4096x2160p_12000;
+      case NTV2_FORMAT_4096x2160p_12000:
+        mVideoFormat = NTV2_FORMAT_4x2048x1080p_12000;
         break;
       default:
-        g_assert_not_reached ();
+        if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD ||
+            mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
+          GST_ERROR ("Quad mode requires UHD/4k resolution");
+          return AJA_STATUS_FAIL;
+        }
+
+        // Ok for HDMI
+        mVideoFormat = inVideoFormat;
+        mQuad = false;
         break;
     }
   } else {
-    mQuad = inQuadMode;
     mVideoFormat = inVideoFormat;
+    mQuad = false;
   }
 
-  if (mQuad) {
+  if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD || mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
     if (mInputChannel != NTV2_CHANNEL1 && mInputChannel != NTV2_CHANNEL5) {
       GST_ERROR ("Quad mode requires channel 1 or 5");
       return AJA_STATUS_FAIL;
@@ -258,7 +297,9 @@ AJAStatus
       return AJA_STATUS_SUCCESS;
 
     //  Get SDI input format
-    status = DetermineInputFormat (mInputChannel, mQuad, mVideoFormat);
+    status = DetermineInputFormat (mInputChannel,
+        mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD || mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI,
+        mVideoFormat);
     if (AJA_FAILURE (status))
       return status;
 
@@ -652,13 +693,22 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   mDevice.SetMode (mInputChannel, NTV2_MODE_CAPTURE, false);
   mDevice.SetFrameBufferFormat (mInputChannel, mPixelFormat);
 
-  if (mQuad) {
+  if (mQuad && mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
     mDevice.Set4kSquaresEnable(true, (NTV2Channel) mInputChannel);
-    if (mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
+    mDevice.SetTsiFrameEnable(true, (NTV2Channel) mInputChannel);
+  } else if (mQuad) {
+    if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD) {
+      mDevice.Set4kSquaresEnable(true, (NTV2Channel) mInputChannel);
+      mDevice.SetTsiFrameEnable(false, (NTV2Channel) mInputChannel);
+    } else if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
+      mDevice.Set4kSquaresEnable(false, (NTV2Channel) mInputChannel);
       mDevice.SetTsiFrameEnable(true, (NTV2Channel) mInputChannel);
     } else {
-      mDevice.SetTsiFrameEnable(false, (NTV2Channel) mInputChannel);
+      g_assert_not_reached ();
     }
+  } else {
+    mDevice.Set4kSquaresEnable(false, (NTV2Channel) mInputChannel);
+    mDevice.SetTsiFrameEnable(false, (NTV2Channel) mInputChannel);
   }
 
   mDevice.EnableChannel (mInputChannel);
@@ -767,6 +817,9 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   NTV2InputCrosspointID fbfInputSelect;
   CNTV2SignalRouter router;
 
+  // Get old router
+  mDevice.GetRouting(router);
+
   // Get corresponding input select entries for the channel
   switch (mInputChannel) {
     default:
@@ -804,9 +857,118 @@ AJAStatus NTV2GstAV::SetupVideo (void)
       break;
   }
 
-  // Special-case for UHD HDMI
+  // Disconnect anything related to the input channel(s) and other connectors
+  // we would be using for any other mode for those input channel(s).
+  if (mQuad && mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
+    // Need to disconnect the 4 inputs corresponding to this channel from
+    // their framebuffers/muxers, and muxers from their framebuffers
+    NTV2ActualConnections connections = router.GetConnections();
+
+    for (NTV2ActualConnectionsConstIter iter = connections.begin(); iter != connections.end(); iter++) {
+      if (iter->first == NTV2_XptFrameBuffer1Input ||
+          iter->first == NTV2_XptFrameBuffer1BInput ||
+          iter->first == NTV2_XptFrameBuffer2Input ||
+          iter->first == NTV2_XptFrameBuffer2BInput ||
+          iter->second == NTV2_Xpt425Mux1AYUV ||
+          iter->second == NTV2_Xpt425Mux1BYUV ||
+          iter->second == NTV2_Xpt425Mux2AYUV ||
+          iter->second == NTV2_Xpt425Mux2BYUV ||
+          iter->first == NTV2_Xpt425Mux1AInput ||
+          iter->first == NTV2_Xpt425Mux1BInput ||
+          iter->first == NTV2_Xpt425Mux2AInput ||
+          iter->first == NTV2_Xpt425Mux2BInput ||
+          iter->second == NTV2_XptHDMIIn1 ||
+          iter->second == NTV2_XptHDMIIn1Q2 ||
+          iter->second == NTV2_XptHDMIIn1Q3 ||
+          iter->second == NTV2_XptHDMIIn1Q4)
+        router.RemoveConnection(iter->first, iter->second);
+    }
+  } else if (mQuad && mInputChannel == NTV2_CHANNEL1) {
+    // Need to disconnect the 4 inputs corresponding to this channel from
+    // their framebuffers/muxers, and muxers from their framebuffers
+    NTV2ActualConnections connections = router.GetConnections();
+
+    for (NTV2ActualConnectionsConstIter iter = connections.begin(); iter != connections.end(); iter++) {
+      if (iter->first == NTV2_XptFrameBuffer1Input ||
+          iter->first == NTV2_XptFrameBuffer1BInput ||
+          iter->first == NTV2_XptFrameBuffer2Input ||
+          iter->first == NTV2_XptFrameBuffer2BInput ||
+          iter->second == NTV2_Xpt425Mux1AYUV ||
+          iter->second == NTV2_Xpt425Mux1BYUV ||
+          iter->second == NTV2_Xpt425Mux2AYUV ||
+          iter->second == NTV2_Xpt425Mux2BYUV ||
+          iter->first == NTV2_Xpt425Mux1AInput ||
+          iter->first == NTV2_Xpt425Mux1BInput ||
+          iter->first == NTV2_Xpt425Mux2AInput ||
+          iter->first == NTV2_Xpt425Mux2BInput ||
+          iter->second == NTV2_XptSDIIn1 ||
+          iter->second == NTV2_XptSDIIn2 ||
+          iter->second == NTV2_XptSDIIn3 ||
+          iter->second == NTV2_XptSDIIn4 ||
+          iter->first == NTV2_XptFrameBuffer1Input ||
+          iter->first == NTV2_XptFrameBuffer2Input ||
+          iter->first == NTV2_XptFrameBuffer3Input ||
+          iter->first == NTV2_XptFrameBuffer4Input
+          )
+        router.RemoveConnection(iter->first, iter->second);
+    }
+  } else if (mQuad) {
+    // Need to disconnect the 4 inputs corresponding to this channel from
+    // their framebuffers/muxers, and muxers from their framebuffers
+    NTV2ActualConnections connections = router.GetConnections();
+
+    for (NTV2ActualConnectionsConstIter iter = connections.begin(); iter != connections.end(); iter++) {
+      if (iter->first == NTV2_XptFrameBuffer5Input ||
+          iter->first == NTV2_XptFrameBuffer5BInput ||
+          iter->first == NTV2_XptFrameBuffer6Input ||
+          iter->first == NTV2_XptFrameBuffer6BInput ||
+          iter->second == NTV2_Xpt425Mux3AYUV ||
+          iter->second == NTV2_Xpt425Mux3BYUV ||
+          iter->second == NTV2_Xpt425Mux4AYUV ||
+          iter->second == NTV2_Xpt425Mux4BYUV ||
+          iter->first == NTV2_Xpt425Mux3AInput ||
+          iter->first == NTV2_Xpt425Mux3BInput ||
+          iter->first == NTV2_Xpt425Mux4AInput ||
+          iter->first == NTV2_Xpt425Mux4BInput ||
+          iter->second == NTV2_XptSDIIn5 ||
+          iter->second == NTV2_XptSDIIn6 ||
+          iter->second == NTV2_XptSDIIn7 ||
+          iter->second == NTV2_XptSDIIn8 ||
+          iter->first == NTV2_XptFrameBuffer5Input ||
+          iter->first == NTV2_XptFrameBuffer6Input ||
+          iter->first == NTV2_XptFrameBuffer7Input ||
+          iter->first == NTV2_XptFrameBuffer8Input)
+        router.RemoveConnection(iter->first, iter->second);
+    }
+  } else {
+    // Need to only disconnect the input and its framebuffer
+    NTV2ActualConnections connections = router.GetConnections();
+
+    for (NTV2ActualConnectionsConstIter iter = connections.begin(); iter != connections.end(); iter++) {
+      if (iter->first == fbfInputSelect ||
+          iter->second == inputIdentifier)
+        router.RemoveConnection(iter->first, iter->second);
+
+      if (((inputIdentifier == NTV2_XptSDIIn6 || inputIdentifier == NTV2_XptSDIIn8) &&
+          iter->first == NTV2_XptFrameBuffer6BInput) ||
+          ((inputIdentifier == NTV2_XptSDIIn5 || inputIdentifier == NTV2_XptSDIIn6) &&
+          iter->first == NTV2_XptFrameBuffer5BInput) ||
+          ((inputIdentifier == NTV2_XptSDIIn4 || inputIdentifier == NTV2_XptSDIIn2) &&
+          iter->first == NTV2_XptFrameBuffer2BInput) ||
+          ((inputIdentifier == NTV2_XptSDIIn1 || inputIdentifier == NTV2_XptSDIIn2) &&
+          iter->first == NTV2_XptFrameBuffer1BInput))
+        router.RemoveConnection(iter->first, iter->second);
+    }
+  }
+
+  // Special-case for UHD HDMI and SDI TSI
   if (mQuad && mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
     inputIdentifier = NTV2_Xpt425Mux1AYUV;
+  } else if (mQuad && mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
+    if (mInputChannel == NTV2_CHANNEL1)
+      inputIdentifier = NTV2_Xpt425Mux1AYUV;
+    else
+      inputIdentifier = NTV2_Xpt425Mux3AYUV;
   }
 
   // Add to the mapping to the router for this channel
@@ -864,6 +1026,28 @@ AJAStatus NTV2GstAV::SetupVideo (void)
         router.AddConnection(NTV2_Xpt425Mux1BInput, NTV2_XptHDMIIn1Q2);
         router.AddConnection(NTV2_Xpt425Mux2AInput, NTV2_XptHDMIIn1Q3);
         router.AddConnection(NTV2_Xpt425Mux2BInput, NTV2_XptHDMIIn1Q4);
+    } else if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
+      if (mInputChannel == NTV2_CHANNEL1) {
+        router.AddConnection(NTV2_XptFrameBuffer1BInput, NTV2_Xpt425Mux1BYUV);
+        router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_Xpt425Mux2AYUV);
+        router.AddConnection(NTV2_XptFrameBuffer2BInput, NTV2_Xpt425Mux2BYUV);
+
+        router.AddConnection(NTV2_Xpt425Mux1AInput, NTV2_XptSDIIn1);
+        router.AddConnection(NTV2_Xpt425Mux1BInput, NTV2_XptSDIIn2);
+        router.AddConnection(NTV2_Xpt425Mux2AInput, NTV2_XptSDIIn3);
+        router.AddConnection(NTV2_Xpt425Mux2BInput, NTV2_XptSDIIn4);
+      } else {
+        router.AddConnection(NTV2_XptFrameBuffer5BInput, NTV2_Xpt425Mux3BYUV);
+        router.AddConnection(NTV2_XptFrameBuffer6Input, NTV2_Xpt425Mux4AYUV);
+        router.AddConnection(NTV2_XptFrameBuffer6BInput, NTV2_Xpt425Mux4BYUV);
+
+        router.AddConnection(NTV2_Xpt425Mux3AInput, NTV2_XptSDIIn5);
+        router.AddConnection(NTV2_Xpt425Mux3BInput, NTV2_XptSDIIn6);
+        router.AddConnection(NTV2_Xpt425Mux4AInput, NTV2_XptSDIIn7);
+        router.AddConnection(NTV2_Xpt425Mux4BInput, NTV2_XptSDIIn8);
+      }
+      mOutputChannel = NTV2_CHANNEL5;
+      mEncodeChannel = M31_CH0;
     } else {
       if (mInputChannel == NTV2_CHANNEL1) {
         router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
@@ -913,7 +1097,21 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   }
 
   // Enable routes
-  mDevice.ApplySignalRoute (router, false);
+  {
+    stringstream os;
+    CNTV2SignalRouter oldRouter;
+    mDevice.GetRouting(oldRouter);
+    oldRouter.Print(os);
+    GST_DEBUG ("Previous routing:\n%s", os.str().c_str());
+  }
+  mDevice.ApplySignalRoute (router, true);
+  {
+    stringstream os;
+    CNTV2SignalRouter currentRouter;
+    mDevice.GetRouting(currentRouter);
+    currentRouter.Print(os);
+    GST_DEBUG ("New routing:\n%s", os.str().c_str());
+  }
 
   //    Set the device reference to the input...
   //    FIXME

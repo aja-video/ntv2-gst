@@ -39,6 +39,12 @@ typedef enum
     AUDIO_CALLBACK
 } CallBackType;
 
+typedef enum {
+  SDI_INPUT_MODE_SINGLE_LINK,
+  SDI_INPUT_MODE_QUAD_LINK_SQD,
+  SDI_INPUT_MODE_QUAD_LINK_TSI,
+} SDIInputMode;
+
 typedef struct
 {
     GstBuffer *     buffer;                 /// If buffer != NULL, it actually owns the AjaVideoBuff and the following 3 fields are NULL
@@ -136,7 +142,7 @@ class NTV2GstAV
                                 const bool                      inIs422         = false,
                                 const bool                      inIsAuto        = false,
                                 const bool                      inHevcOutput    = false,
-                                const bool                      inQuadMode      = false,
+                                const SDIInputMode              inSDIInputMode  = SDI_INPUT_MODE_SINGLE_LINK,
                                 const NTV2TCIndex               inTimeCode      = NTV2_TCINDEX_SDI1,
                                 const bool                      inInfoData      = false,
 				const bool                      inCaptureTall   = false,
@@ -321,7 +327,8 @@ class NTV2GstAV
         uint32_t                    mBitDepth;              /// Bit depth of frame store (8 or 10)
         bool                        mIs422;                    /// Is 422 video otherwise it is 420
         bool                        mIsAuto;                /// Is auto mode (should only be used when called from the audiosrc to set device automatically based on input)
-        bool                        mQuad;                    /// VideoFormat is quad
+        SDIInputMode                mSDIInputMode;           /// SDI input mode
+        bool                        mQuad;
         bool                        mMultiStream;            /// Demonstrates how to configure the board for multi-stream
         bool                        mWithInfo;              /// Demonstrates how to configure picture information mode
         NTV2TCIndex                 mTimecodeMode;        /// Add timecode burn
