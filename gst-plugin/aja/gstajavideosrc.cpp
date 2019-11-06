@@ -1239,18 +1239,21 @@ retry:
     if (src->transferCharacteristics == 0) {
       // SDR-TV is the default
     } else if (src->transferCharacteristics == 1) {
-      src->info.colorimetry.transfer = GST_VIDEO_TRANSFER_SMPTE2084;
-    } else if (src->transferCharacteristics == 2) {
       src->info.colorimetry.transfer = GST_VIDEO_TRANSFER_ARIB_STD_B67;
+    } else if (src->transferCharacteristics == 2) {
+      src->info.colorimetry.transfer = GST_VIDEO_TRANSFER_SMPTE2084;
     }
 #endif
     if (src->colorimetry == 0) {
       if (src->info.height < 720) {
         src->info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT601;
         src->info.colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_SMPTE170M;
-      } else {
+      } else if (src->info.height < 2160) {
         src->info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT709;
         src->info.colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_BT709;
+      } else {
+        src->info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT2020;
+        src->info.colorimetry.primaries = GST_VIDEO_COLOR_PRIMARIES_BT2020;
       }
     } else if (src->colorimetry == 2) {
       src->info.colorimetry.matrix = GST_VIDEO_COLOR_MATRIX_BT2020;
