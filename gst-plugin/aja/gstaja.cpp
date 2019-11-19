@@ -29,6 +29,7 @@
 #include "gstajavideosink.h"
 #include "gstajaaudiosrc.h"
 #include "gstajaaudiosink.h"
+#include "gstajadeviceprovider.h"
 
 GST_DEBUG_CATEGORY_STATIC (gst_aja_debug);
 #define GST_CAT_DEFAULT gst_aja_debug
@@ -831,6 +832,9 @@ aja_init (GstPlugin * plugin)
   //  gst_element_register (plugin, "ajahevcsrc", GST_RANK_NONE, GST_TYPE_AJA_HEVC_SRC);
   gst_element_register (plugin, "ajaaudiosrc", GST_RANK_NONE,
       GST_TYPE_AJA_AUDIO_SRC);
+
+  gst_device_provider_register (plugin, "ajadeviceprovider",
+        GST_RANK_PRIMARY, GST_TYPE_AJA_DEVICE_PROVIDER);
 
   // These don't work yet so lets not register them
   //gst_element_register (plugin, "ajavideosink", GST_RANK_NONE, GST_TYPE_AJA_VIDEO_SINK);

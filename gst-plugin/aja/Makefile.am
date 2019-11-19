@@ -34,6 +34,7 @@ libgstaja_la_SOURCES = \
 	gstaja.cpp \
 	gstajavideosrc.cpp \
 	gstajaaudiosrc.cpp \
+	gstajadeviceprovider.cpp \
 	gstntv2.cpp
 #	gstajavideosink.cpp
 #	gstajaaudiosink.cpp
@@ -43,7 +44,8 @@ libgstaja_la_SOURCES = \
 noinst_HEADERS = \
 	gstaja.h \
 	gstajavideosrc.h \
-	gstajaaudiosrc.cpp \
+	gstajaaudiosrc.h \
+	gstajadeviceprovider.h \
 	gstntv2.h
 #	gstajahevcsrc.h
 #	gstajavideosink.cpp
