@@ -1506,6 +1506,7 @@ NTV2GstAV::ACInputWorker (void)
   mDevice.AutoCirculateStart (mInputChannel);
 
   bool haveSignal = true;
+  unsigned int iterations_without_frame = 0;
 
   while (!mGlobalQuit) {
     AUTOCIRCULATE_STATUS acStatus;
@@ -1662,6 +1663,8 @@ NTV2GstAV::ACInputWorker (void)
 
     haveSignal = (effectiveVideoFormat == inputVideoFormat);
 
+    GST_DEBUG ("Autocirculate state: %d, buffer level %d", acStatus.acState, acStatus.acBufferLevel);
+
     // wait for captured frame
     if (acStatus.acState == NTV2_AUTOCIRCULATE_RUNNING
         && acStatus.acBufferLevel > 1) {
@@ -1673,6 +1676,7 @@ NTV2GstAV::ACInputWorker (void)
           AcquireVideoBuffer ());
       GstMapInfo video_map, audio_map;
 
+      iterations_without_frame = 0;
       pVideoData->haveSignal = haveSignal;
 
       if (pVideoData->buffer) {
@@ -1949,8 +1953,12 @@ NTV2GstAV::ACInputWorker (void)
           mLastFrameAudioOut = true;
           break;
       } else {
-        if (haveSignal) {
+        // If we don't have a frame for 32 iterations (512ms) then consider
+        // this as signal loss too even if the driver still reports the
+        // expected mode above
+        if (haveSignal && iterations_without_frame < 32) {
           mDevice.WaitForInputVerticalInterrupt (mInputChannel);
+          iterations_without_frame++;
         } else {
           DoCallback (VIDEO_CALLBACK, NULL);
           DoCallback (AUDIO_CALLBACK, NULL);
