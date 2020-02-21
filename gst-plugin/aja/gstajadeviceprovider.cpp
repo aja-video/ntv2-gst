@@ -157,7 +157,8 @@ gst_aja_device_new (NTV2DeviceInfo & device, gboolean video)
       "ltc-in-support", G_TYPE_BOOLEAN, device.ltcInSupport,
       "ltc-in-on-ref-port", G_TYPE_BOOLEAN, device.ltcInOnRefPort, "2k-support",
       G_TYPE_BOOLEAN, device.has2KSupport, "4k-support", G_TYPE_BOOLEAN,
-      device.has4KSupport, NULL);
+      device.has4KSupport, "8k-support", G_TYPE_BOOLEAN,
+      device.has8KSupport, NULL);
 
   ret = GST_DEVICE (g_object_new (GST_TYPE_AJA_DEVICE,
           "display-name", display_name,
