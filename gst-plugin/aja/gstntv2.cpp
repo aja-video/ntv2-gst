@@ -1767,7 +1767,7 @@ NTV2GstAV::ACInputWorker (void)
 
     GST_DEBUG ("Expected video format %08x (effective %08x)", (int) mVideoFormat, (int) effectiveVideoFormat);
 
-    haveSignal = (effectiveVideoFormat == inputVideoFormat);
+    haveSignal = (effectiveVideoFormat == inputVideoFormat) || (mVideoFormat == inputVideoFormat);
 
     GST_DEBUG ("Autocirculate state: %d, buffer level %d", acStatus.acState, acStatus.acBufferLevel);
 
