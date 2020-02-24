@@ -186,6 +186,47 @@ static const GstAjaMode modesRaw[GST_AJA_MODE_RAW_END] =
     {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4096x2160p_6000, 4096,   2160,   10, 60,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_4K_10_60p
     {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4096x2160p_11988, 4096,  2160,   10, 120000,   1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_4K_10_11988p
     {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4096x2160p_12000, 4096,  2160,   10, 120,      1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_4K_10_120p
+    
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_2398, 7680,   4320,   8,  24000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_8_2398p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_2400, 7680,   4320,   8,  24,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_8_24p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_2500, 7680,   4320,   8,  25,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_8_25p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_2997, 7680,   4320,   8,  30000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_8_2997p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_3000, 7680,   4320,   8,  30,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_8_30p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_5000, 7680,   4320,   8,  50,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_8_50p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_5994, 7680,   4320,   8,  60000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_8_5994p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_6000, 7680,   4320,   8,  60,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_8_60p
+    
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_2398, 7680,   4320,   10, 24000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_10_2398p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_2400, 7680,   4320,   10, 24,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_10_24p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_2500, 7680,   4320,   10, 25,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_10_25p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_2997, 7680,   4320,   10, 30000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_10_2997p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_3000, 7680,   4320,   10, 30,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_10_30p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_5000, 7680,   4320,   10, 50,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_10_50p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_5994, 7680,   4320,   10, 60000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_10_5994p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x3840x2160p_6000, 7680,   4320,   10, 60,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_UHD2_10_60p
+    
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_2398, 8192,   4320,   8,  24000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_8_2398p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_2400, 8192,   4320,   8,  24,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_8_24p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_2500, 8192,   4320,   8,  25,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_8_25p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_2997, 8192,   4320,   8,  30000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_8_2997p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_3000, 8192,   4320,   8,  30,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_8_30p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_4795, 8192,   4320,   8,  48000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_8_4795p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_4800, 8192,   4320,   8,  48,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_8_48p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_5000, 8192,   4320,   8,  50,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_8_50p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_5994, 8192,   4320,   8,  60000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_8_5994p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_6000, 8192,   4320,   8,  60,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_8_60p
+    
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_2398, 8192,   4320,   10, 24000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_10_2398p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_2400, 8192,   4320,   10, 24,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_10_24p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_2500, 8192,   4320,   10, 25,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_10_25p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_2997, 8192,   4320,   10, 30000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_10_2997p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_3000, 8192,   4320,   10, 30,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_10_30p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_4795, 8192,   4320,   10, 48000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_10_4795p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_4800, 8192,   4320,   10, 48,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_10_48p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_5000, 8192,   4320,   10, 50,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_10_50p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_5994, 8192,   4320,   10, 60000,    1001, false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_10_5994p
+    {M31_NUMVIDEOPRESETS,       NTV2_FORMAT_4x4096x2160p_6000, 8192,   4320,   10, 60,       1,    false,  true,    UHD},   // GST_AJA_MODE_RAW_8K_10_60p
+
 };
 
 GType
@@ -239,23 +280,23 @@ gst_aja_mode_get_type_raw (void)
         {GST_AJA_MODE_RAW_1080_10_60i,      "1080i60-10",       "HD1080 10Bit 60i     "},
         {GST_AJA_MODE_RAW_1080_10_60p,      "1080p60-10",       "HD1080 10Bit 60p     "},
         
-        {GST_AJA_MODE_RAW_UHD_8_2398p,        "UHDp2398",           "UHD3140 8Bit 23.98p     "},
-        {GST_AJA_MODE_RAW_UHD_8_24p,        "UHDp24",           "UHD3140 8Bit 24p     "},
-        {GST_AJA_MODE_RAW_UHD_8_25p,        "UHDp25",           "UHD3140 8Bit 25p     "},
-        {GST_AJA_MODE_RAW_UHD_8_2997p,        "UHDp2997",           "UHD3140 8Bit 29.97p     "},
-        {GST_AJA_MODE_RAW_UHD_8_30p,        "UHDp30",           "UHD3140 8Bit 30p     "},
-        {GST_AJA_MODE_RAW_UHD_8_50p,        "UHDp50",           "UHD3140 8Bit 50p     "},
-        {GST_AJA_MODE_RAW_UHD_8_5994p,      "UHDp5994",        "UHD3140 8Bit 59.94p  "},
-        {GST_AJA_MODE_RAW_UHD_8_60p,        "UHDp60",           "UHD3140 8Bit 60p     "},
+        {GST_AJA_MODE_RAW_UHD_8_2398p,        "UHDp2398",           "UHD3840 8Bit 23.98p     "},
+        {GST_AJA_MODE_RAW_UHD_8_24p,        "UHDp24",           "UHD3840 8Bit 24p     "},
+        {GST_AJA_MODE_RAW_UHD_8_25p,        "UHDp25",           "UHD3840 8Bit 25p     "},
+        {GST_AJA_MODE_RAW_UHD_8_2997p,        "UHDp2997",           "UHD3840 8Bit 29.97p     "},
+        {GST_AJA_MODE_RAW_UHD_8_30p,        "UHDp30",           "UHD3840 8Bit 30p     "},
+        {GST_AJA_MODE_RAW_UHD_8_50p,        "UHDp50",           "UHD3840 8Bit 50p     "},
+        {GST_AJA_MODE_RAW_UHD_8_5994p,      "UHDp5994",        "UHD3840 8Bit 59.94p  "},
+        {GST_AJA_MODE_RAW_UHD_8_60p,        "UHDp60",           "UHD3840 8Bit 60p     "},
         
-        {GST_AJA_MODE_RAW_UHD_10_2398p,       "UHDp2398-10",        "UHD3140 10Bit 23.98p    "},
-        {GST_AJA_MODE_RAW_UHD_10_24p,       "UHDp24-10",        "UHD3140 10Bit 24p    "},
-        {GST_AJA_MODE_RAW_UHD_10_25p,       "UHDp25-10",        "UHD3140 10Bit 25p    "},
-        {GST_AJA_MODE_RAW_UHD_10_2997p,       "UHDp2997-10",        "UHD3140 10Bit 29.97p    "},
-        {GST_AJA_MODE_RAW_UHD_10_30p,       "UHDp30-10",        "UHD3140 10Bit 30p    "},
-        {GST_AJA_MODE_RAW_UHD_10_50p,       "UHDp50-10",        "UHD3140 10Bit 50p    "},
-        {GST_AJA_MODE_RAW_UHD_10_5994p,     "UHDp5994-10",     "UHD3140 10Bit 59.94p "},
-        {GST_AJA_MODE_RAW_UHD_10_60p,       "UHDp60-10",        "UHD3140 10Bit 60p    "},
+        {GST_AJA_MODE_RAW_UHD_10_2398p,       "UHDp2398-10",        "UHD3840 10Bit 23.98p    "},
+        {GST_AJA_MODE_RAW_UHD_10_24p,       "UHDp24-10",        "UHD3840 10Bit 24p    "},
+        {GST_AJA_MODE_RAW_UHD_10_25p,       "UHDp25-10",        "UHD3840 10Bit 25p    "},
+        {GST_AJA_MODE_RAW_UHD_10_2997p,       "UHDp2997-10",        "UHD3840 10Bit 29.97p    "},
+        {GST_AJA_MODE_RAW_UHD_10_30p,       "UHDp30-10",        "UHD3840 10Bit 30p    "},
+        {GST_AJA_MODE_RAW_UHD_10_50p,       "UHDp50-10",        "UHD3840 10Bit 50p    "},
+        {GST_AJA_MODE_RAW_UHD_10_5994p,     "UHDp5994-10",     "UHD3840 10Bit 59.94p "},
+        {GST_AJA_MODE_RAW_UHD_10_60p,       "UHDp60-10",        "UHD3840 10Bit 60p    "},
         
         {GST_AJA_MODE_RAW_4K_8_2398p,         "4Kp2398",            "4K4096 8Bit 23.98p      "},
         {GST_AJA_MODE_RAW_4K_8_24p,         "4Kp24",            "4K4096 8Bit 24p      "},
@@ -282,6 +323,46 @@ gst_aja_mode_get_type_raw (void)
         {GST_AJA_MODE_RAW_4K_10_60p,        "4Kp60-10",         "4K4096 10Bit 60p     "},
         {GST_AJA_MODE_RAW_4K_10_11988p,        "4Kp11988-10",         "4K4096 10Bit 119.88p     "},
         {GST_AJA_MODE_RAW_4K_10_120p,        "4Kp1200-10",         "4K4096 10Bit 120p     "},
+        
+        {GST_AJA_MODE_RAW_UHD2_8_2398p,        "UHD2p2398",           "UHD-2 7680 8Bit 23.98p     "},
+        {GST_AJA_MODE_RAW_UHD2_8_24p,        "UHD2p24",           "UHD-2 7680 8Bit 24p     "},
+        {GST_AJA_MODE_RAW_UHD2_8_25p,        "UHD2p25",           "UHD-2 7680 8Bit 25p     "},
+        {GST_AJA_MODE_RAW_UHD2_8_2997p,        "UHD2p2997",           "UHD-2 7680 8Bit 29.97p     "},
+        {GST_AJA_MODE_RAW_UHD2_8_30p,        "UHD2p30",           "UHD-2 7680 8Bit 30p     "},
+        {GST_AJA_MODE_RAW_UHD2_8_50p,        "UHD2p50",           "UHD-2 7680 8Bit 50p     "},
+        {GST_AJA_MODE_RAW_UHD2_8_5994p,      "UHD2p5994",        "UHD-2 7680 8Bit 59.94p  "},
+        {GST_AJA_MODE_RAW_UHD2_8_60p,        "UHD2p60",           "UHD-2 7680 8Bit 60p     "},
+        
+        {GST_AJA_MODE_RAW_UHD2_10_2398p,       "UHD2p2398-10",        "UHD-2 7680 10Bit 23.98p    "},
+        {GST_AJA_MODE_RAW_UHD2_10_24p,       "UHD2p24-10",        "UHD-2 7680 10Bit 24p    "},
+        {GST_AJA_MODE_RAW_UHD2_10_25p,       "UHD2p25-10",        "UHD-2 7680 10Bit 25p    "},
+        {GST_AJA_MODE_RAW_UHD2_10_2997p,       "UHD2p2997-10",        "UHD-2 7680 10Bit 29.97p    "},
+        {GST_AJA_MODE_RAW_UHD2_10_30p,       "UHD2p30-10",        "UHD-2 7680 10Bit 30p    "},
+        {GST_AJA_MODE_RAW_UHD2_10_50p,       "UHD2p50-10",        "UHD-2 7680 10Bit 50p    "},
+        {GST_AJA_MODE_RAW_UHD2_10_5994p,     "UHD2p5994-10",     "UHD-2 7680 10Bit 59.94p "},
+        {GST_AJA_MODE_RAW_UHD2_10_60p,       "UHD2p60-10",        "UHD-2 7680 10Bit 60p    "},
+        
+        {GST_AJA_MODE_RAW_8K_8_2398p,         "8Kp2398",            "8K8192 8Bit 23.98p      "},
+        {GST_AJA_MODE_RAW_8K_8_24p,         "8Kp24",            "8K8192 8Bit 24p      "},
+        {GST_AJA_MODE_RAW_8K_8_25p,         "8Kp25",            "8K8192 8Bit 25p      "},
+        {GST_AJA_MODE_RAW_8K_8_2997p,         "8Kp2997",            "8K8192 8Bit 29.97p      "},
+        {GST_AJA_MODE_RAW_8K_8_30p,         "8Kp30",            "8K8192 8Bit 30p      "},
+        {GST_AJA_MODE_RAW_8K_8_4795p,         "8Kp4795",            "8K8192 8Bit 47.95p      "},
+        {GST_AJA_MODE_RAW_8K_8_48p,         "8Kp48",            "8K8192 8Bit 48p      "},
+        {GST_AJA_MODE_RAW_8K_8_50p,         "8Kp50",            "8K8192 8Bit 50p      "},
+        {GST_AJA_MODE_RAW_8K_8_5994p,       "8Kp5994",         "8K8192 8Bit 59.94p   "},
+        {GST_AJA_MODE_RAW_8K_8_60p,         "8Kp60",            "8K8192 8Bit 60p      "},
+        
+        {GST_AJA_MODE_RAW_8K_10_2398p,        "8Kp2398-10",         "8K8192 10Bit 23.98p     "},
+        {GST_AJA_MODE_RAW_8K_10_24p,        "8Kp24-10",         "8K8192 10Bit 24p     "},
+        {GST_AJA_MODE_RAW_8K_10_25p,        "8Kp25-10",         "8K8192 10Bit 25p     "},
+        {GST_AJA_MODE_RAW_8K_10_2997p,        "8Kp2997-10",         "8K8192 10Bit 29.97p     "},
+        {GST_AJA_MODE_RAW_8K_10_30p,        "8Kp30-10",         "8K8192 10Bit 30p     "},
+        {GST_AJA_MODE_RAW_8K_10_4795p,        "8Kp4795-10",         "8K8192 10Bit 47.95p     "},
+        {GST_AJA_MODE_RAW_8K_10_48p,        "8Kp48-10",         "8K8192 10Bit 48p     "},
+        {GST_AJA_MODE_RAW_8K_10_50p,        "8Kp50-10",         "8K8192 10Bit 50p     "},
+        {GST_AJA_MODE_RAW_8K_10_5994p,      "8Kp5994-10",      "8K8192 10Bit 59.94p  "},
+        {GST_AJA_MODE_RAW_8K_10_60p,        "8Kp60-10",         "8K8192 10Bit 60p     "},
         {0,                                 NULL,               NULL}
     };
     
@@ -436,17 +517,17 @@ gst_aja_mode_get_type_hevc (void)
         {GST_AJA_MODE_HEVC_1080_422_10_60i,      "1080i60-10+",      "HD1080 10Bit 422 60i      "},
         {GST_AJA_MODE_HEVC_1080_422_10_60p,      "1080p60-10+",      "HD1080 10Bit 422 60p      "},
         
-        {GST_AJA_MODE_HEVC_UHD_420_8_50p,        "UHDp50",           "UHD3140 8Bit 420 50p      "},
-        {GST_AJA_MODE_HEVC_UHD_420_8_5994p,      "UHDp5994",        "UHD3140 8Bit 420 59.94p   "},
-        {GST_AJA_MODE_HEVC_UHD_420_8_60p,        "UHDp60",           "UHD3140 8Bit 420 60p      "},
+        {GST_AJA_MODE_HEVC_UHD_420_8_50p,        "UHDp50",           "UHD3840 8Bit 420 50p      "},
+        {GST_AJA_MODE_HEVC_UHD_420_8_5994p,      "UHDp5994",        "UHD3840 8Bit 420 59.94p   "},
+        {GST_AJA_MODE_HEVC_UHD_420_8_60p,        "UHDp60",           "UHD3840 8Bit 420 60p      "},
         
-        {GST_AJA_MODE_HEVC_UHD_420_10_50p,       "UHDp50-10",        "UHD3140 10Bit 420 50p     "},
-        {GST_AJA_MODE_HEVC_UHD_420_10_5994p,     "UHDp5994-10",     "UHD3140 10Bit 420 59.94p  "},
-        {GST_AJA_MODE_HEVC_UHD_420_10_60p,       "UHDp60-10",        "UHD3140 10Bit 420 60p     "},
+        {GST_AJA_MODE_HEVC_UHD_420_10_50p,       "UHDp50-10",        "UHD3840 10Bit 420 50p     "},
+        {GST_AJA_MODE_HEVC_UHD_420_10_5994p,     "UHDp5994-10",     "UHD3840 10Bit 420 59.94p  "},
+        {GST_AJA_MODE_HEVC_UHD_420_10_60p,       "UHDp60-10",        "UHD3840 10Bit 420 60p     "},
         
-        {GST_AJA_MODE_HEVC_UHD_422_10_50p,       "UHDp50-10+",       "UHD3140 10Bit 422 50p     "},
-        {GST_AJA_MODE_HEVC_UHD_422_10_5994p,     "UHDp5994-10+",    "UHD3140 10Bit 422 59.94p  "},
-        {GST_AJA_MODE_HEVC_UHD_422_10_60p,       "UHDp60-10+",       "UHD3140 10Bit 422 60p     "},
+        {GST_AJA_MODE_HEVC_UHD_422_10_50p,       "UHDp50-10+",       "UHD3840 10Bit 422 50p     "},
+        {GST_AJA_MODE_HEVC_UHD_422_10_5994p,     "UHDp5994-10+",    "UHD3840 10Bit 422 59.94p  "},
+        {GST_AJA_MODE_HEVC_UHD_422_10_60p,       "UHDp60-10+",       "UHD3840 10Bit 422 60p     "},
         {0,                                 NULL,               NULL}
     };
     

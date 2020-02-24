@@ -265,15 +265,22 @@ AJAStatus
         mVideoFormat = NTV2_FORMAT_4x2048x1080p_12000;
         break;
       default:
-        if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD ||
-            mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
-          GST_ERROR ("Quad mode requires UHD/4k resolution");
-          return AJA_STATUS_FAIL;
-        }
+        if (inVideoFormat >= NTV2_FORMAT_FIRST_UHD2_DEF_FORMAT &&
+            inVideoFormat <= NTV2_FORMAT_END_UHD2_FULL_DEF_FORMATS) {
+          // For UHD2/8k there are only the 4x formats available currently
+          mVideoFormat = inVideoFormat;
+          mQuad = true;
+        } else {
+          if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD ||
+              mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
+            GST_ERROR ("Quad mode requires UHD/UHD2/4k/8k resolution");
+            return AJA_STATUS_FAIL;
+          }
 
-        // Ok for HDMI
-        mVideoFormat = inVideoFormat;
-        mQuad = false;
+          // Ok for HDMI
+          mVideoFormat = inVideoFormat;
+          mQuad = false;
+        }
         break;
     }
   } else {
@@ -698,11 +705,23 @@ AJAStatus NTV2GstAV::SetupVideo (void)
     mDevice.SetTsiFrameEnable(true, (NTV2Channel) mInputChannel);
   } else if (mQuad) {
     if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_SQD) {
-      mDevice.Set4kSquaresEnable(true, (NTV2Channel) mInputChannel);
-      mDevice.SetTsiFrameEnable(false, (NTV2Channel) mInputChannel);
+      if (mVideoFormat >= NTV2_FORMAT_FIRST_UHD2_DEF_FORMAT &&
+          mVideoFormat <= NTV2_FORMAT_END_UHD2_FULL_DEF_FORMATS) {
+        mDevice.SetQuadQuadFrameEnable(true, (NTV2Channel) mInputChannel);
+        mDevice.SetQuadQuadSquaresEnable(true, (NTV2Channel) mInputChannel);
+      } else {
+        mDevice.Set4kSquaresEnable(true, (NTV2Channel) mInputChannel);
+        mDevice.SetTsiFrameEnable(false, (NTV2Channel) mInputChannel);
+      }
     } else if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
-      mDevice.Set4kSquaresEnable(false, (NTV2Channel) mInputChannel);
-      mDevice.SetTsiFrameEnable(true, (NTV2Channel) mInputChannel);
+      if (mVideoFormat >= NTV2_FORMAT_FIRST_UHD2_DEF_FORMAT &&
+          mVideoFormat <= NTV2_FORMAT_END_UHD2_FULL_DEF_FORMATS) {
+        mDevice.SetQuadQuadFrameEnable(true, (NTV2Channel) mInputChannel);
+        mDevice.SetQuadQuadSquaresEnable(false, (NTV2Channel) mInputChannel);
+      } else {
+        mDevice.Set4kSquaresEnable(false, (NTV2Channel) mInputChannel);
+        mDevice.SetTsiFrameEnable(true, (NTV2Channel) mInputChannel);
+      }
     } else {
       g_assert_not_reached ();
     }
@@ -891,8 +910,10 @@ AJAStatus NTV2GstAV::SetupVideo (void)
     for (NTV2ActualConnectionsConstIter iter = connections.begin(); iter != connections.end(); iter++) {
       if (iter->first == NTV2_XptFrameBuffer1Input ||
           iter->first == NTV2_XptFrameBuffer1BInput ||
+          iter->first == NTV2_XptFrameBuffer1DS2Input ||
           iter->first == NTV2_XptFrameBuffer2Input ||
           iter->first == NTV2_XptFrameBuffer2BInput ||
+          iter->first == NTV2_XptFrameBuffer2DS2Input ||
           iter->second == NTV2_Xpt425Mux1AYUV ||
           iter->second == NTV2_Xpt425Mux1BYUV ||
           iter->second == NTV2_Xpt425Mux2AYUV ||
@@ -905,6 +926,8 @@ AJAStatus NTV2GstAV::SetupVideo (void)
           iter->second == NTV2_XptSDIIn2 ||
           iter->second == NTV2_XptSDIIn3 ||
           iter->second == NTV2_XptSDIIn4 ||
+          iter->second == NTV2_XptSDIIn1DS2 ||
+          iter->second == NTV2_XptSDIIn2DS2 ||
           iter->first == NTV2_XptFrameBuffer1Input ||
           iter->first == NTV2_XptFrameBuffer2Input ||
           iter->first == NTV2_XptFrameBuffer3Input ||
@@ -920,8 +943,10 @@ AJAStatus NTV2GstAV::SetupVideo (void)
     for (NTV2ActualConnectionsConstIter iter = connections.begin(); iter != connections.end(); iter++) {
       if (iter->first == NTV2_XptFrameBuffer5Input ||
           iter->first == NTV2_XptFrameBuffer5BInput ||
+          iter->first == NTV2_XptFrameBuffer5DS2Input ||
           iter->first == NTV2_XptFrameBuffer6Input ||
           iter->first == NTV2_XptFrameBuffer6BInput ||
+          iter->first == NTV2_XptFrameBuffer6DS2Input ||
           iter->second == NTV2_Xpt425Mux3AYUV ||
           iter->second == NTV2_Xpt425Mux3BYUV ||
           iter->second == NTV2_Xpt425Mux4AYUV ||
@@ -934,6 +959,8 @@ AJAStatus NTV2GstAV::SetupVideo (void)
           iter->second == NTV2_XptSDIIn6 ||
           iter->second == NTV2_XptSDIIn7 ||
           iter->second == NTV2_XptSDIIn8 ||
+          iter->second == NTV2_XptSDIIn5DS2 ||
+          iter->second == NTV2_XptSDIIn6DS2 ||
           iter->first == NTV2_XptFrameBuffer5Input ||
           iter->first == NTV2_XptFrameBuffer6Input ||
           iter->first == NTV2_XptFrameBuffer7Input ||
@@ -964,7 +991,7 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   // Special-case for UHD HDMI and SDI TSI
   if (mQuad && mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
     inputIdentifier = NTV2_Xpt425Mux1AYUV;
-  } else if (mQuad && mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
+  } else if (mQuad && mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI && mVideoFormat < NTV2_FORMAT_FIRST_UHD2_DEF_FORMAT) {
     if (mInputChannel == NTV2_CHANNEL1)
       inputIdentifier = NTV2_Xpt425Mux1AYUV;
     else
@@ -1026,6 +1053,31 @@ AJAStatus NTV2GstAV::SetupVideo (void)
         router.AddConnection(NTV2_Xpt425Mux1BInput, NTV2_XptHDMIIn1Q2);
         router.AddConnection(NTV2_Xpt425Mux2AInput, NTV2_XptHDMIIn1Q3);
         router.AddConnection(NTV2_Xpt425Mux2BInput, NTV2_XptHDMIIn1Q4);
+    } else if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI && NTV2_IS_QUAD_QUAD_HFR_VIDEO_FORMAT(mVideoFormat)) {
+      if (mInputChannel == NTV2_CHANNEL1) {
+        router.AddConnection(NTV2_XptFrameBuffer1DS2Input, NTV2_XptSDIIn2);
+        router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn3);
+        router.AddConnection(NTV2_XptFrameBuffer2DS2Input, NTV2_XptSDIIn4);
+      } else {
+        router.AddConnection(NTV2_XptFrameBuffer5DS2Input, NTV2_XptSDIIn6);
+        router.AddConnection(NTV2_XptFrameBuffer5Input, NTV2_XptSDIIn7);
+        router.AddConnection(NTV2_XptFrameBuffer6DS2Input, NTV2_XptSDIIn8);
+      }
+      mOutputChannel = NTV2_CHANNEL5;
+      mEncodeChannel = M31_CH0;
+    } else if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI && NTV2_IS_QUAD_QUAD_FORMAT(mVideoFormat)) {
+      if (mInputChannel == NTV2_CHANNEL1) {
+        router.AddConnection(NTV2_XptFrameBuffer1DS2Input, NTV2_XptSDIIn1DS2);
+        router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
+        router.AddConnection(NTV2_XptFrameBuffer2DS2Input, NTV2_XptSDIIn2DS2);
+      } else {
+        router.AddConnection(NTV2_XptFrameBuffer5DS2Input, NTV2_XptSDIIn5DS2);
+        router.AddConnection(NTV2_XptFrameBuffer5Input, NTV2_XptSDIIn6);
+        router.AddConnection(NTV2_XptFrameBuffer6DS2Input, NTV2_XptSDIIn6DS2);
+      }
+      mOutputChannel = NTV2_CHANNEL5;
+      mEncodeChannel = M31_CH0;
+
     } else if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
       if (mInputChannel == NTV2_CHANNEL1) {
         router.AddConnection(NTV2_XptFrameBuffer1BInput, NTV2_Xpt425Mux1BYUV);
@@ -1654,6 +1706,60 @@ NTV2GstAV::ACInputWorker (void)
         case NTV2_FORMAT_4x2048x1080p_6000:
           effectiveVideoFormat = NTV2_FORMAT_1080p_2K_6000_A;
           break;
+        case NTV2_FORMAT_4x3840x2160p_2398:
+          effectiveVideoFormat = NTV2_FORMAT_3840x2160p_2398;
+          break;
+        case NTV2_FORMAT_4x3840x2160p_2400:
+          effectiveVideoFormat = NTV2_FORMAT_3840x2160p_2400;
+          break;
+        case NTV2_FORMAT_4x3840x2160p_2500:
+          effectiveVideoFormat = NTV2_FORMAT_3840x2160p_2500;
+          break;
+        case NTV2_FORMAT_4x3840x2160p_2997:
+          effectiveVideoFormat = NTV2_FORMAT_3840x2160p_2997;
+          break;
+        case NTV2_FORMAT_4x3840x2160p_3000:
+          effectiveVideoFormat = NTV2_FORMAT_3840x2160p_3000;
+          break;
+        case NTV2_FORMAT_4x3840x2160p_5000:
+          effectiveVideoFormat = NTV2_FORMAT_3840x2160p_5000;
+          break;
+        case NTV2_FORMAT_4x3840x2160p_5994:
+          effectiveVideoFormat = NTV2_FORMAT_3840x2160p_5994;
+          break;
+        case NTV2_FORMAT_4x3840x2160p_6000:
+          effectiveVideoFormat = NTV2_FORMAT_3840x2160p_6000;
+          break;
+        case NTV2_FORMAT_4x4096x2160p_2398:
+          effectiveVideoFormat = NTV2_FORMAT_4096x2160p_2398;
+          break;
+        case NTV2_FORMAT_4x4096x2160p_2400:
+          effectiveVideoFormat = NTV2_FORMAT_4096x2160p_2400;
+          break;
+        case NTV2_FORMAT_4x4096x2160p_2500:
+          effectiveVideoFormat = NTV2_FORMAT_4096x2160p_2500;
+          break;
+        case NTV2_FORMAT_4x4096x2160p_2997:
+          effectiveVideoFormat = NTV2_FORMAT_4096x2160p_2997;
+          break;
+        case NTV2_FORMAT_4x4096x2160p_3000:
+          effectiveVideoFormat = NTV2_FORMAT_4096x2160p_3000;
+          break;
+        case NTV2_FORMAT_4x4096x2160p_4795:
+          effectiveVideoFormat = NTV2_FORMAT_4096x2160p_4795;
+          break;
+        case NTV2_FORMAT_4x4096x2160p_4800:
+          effectiveVideoFormat = NTV2_FORMAT_4096x2160p_4800;
+          break;
+        case NTV2_FORMAT_4x4096x2160p_5000:
+          effectiveVideoFormat = NTV2_FORMAT_4096x2160p_5000;
+          break;
+        case NTV2_FORMAT_4x4096x2160p_5994:
+          effectiveVideoFormat = NTV2_FORMAT_4096x2160p_5994;
+          break;
+        case NTV2_FORMAT_4x4096x2160p_6000:
+          effectiveVideoFormat = NTV2_FORMAT_4096x2160p_6000;
+          break;
         default:
           break;
       }
@@ -1661,7 +1767,7 @@ NTV2GstAV::ACInputWorker (void)
 
     GST_DEBUG ("Expected video format %08x (effective %08x)", (int) mVideoFormat, (int) effectiveVideoFormat);
 
-    haveSignal = (effectiveVideoFormat == inputVideoFormat);
+    haveSignal = (effectiveVideoFormat == inputVideoFormat) || (mVideoFormat == inputVideoFormat);
 
     GST_DEBUG ("Autocirculate state: %d, buffer level %d", acStatus.acState, acStatus.acBufferLevel);
 
