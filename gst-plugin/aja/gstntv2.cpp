@@ -116,6 +116,19 @@ AJAStatus NTV2GstAV::Open (void)
   mDevice.SetEveryFrameServices (NTV2_OEM_TASKS);       //    Since this is an OEM app, use the OEM service level
   mDeviceID = mDevice.GetDeviceID ();   //    Keep the device ID handy, as it's used frequently
 
+  std::string serialNumber;
+
+  if (!mDevice.GetSerialNumberString (serialNumber))
+    serialNumber = "(none)";
+
+  GST_DEBUG ("Opened device with ID %d (%s, version %s, serial number %s)",
+      mDeviceID, mDevice.GetDisplayName ().c_str (),
+      mDevice.GetDeviceVersionString ().c_str (), serialNumber.c_str ());
+  GST_DEBUG ("Using SDK version %d.%d.%d.%d (%s) and driver version %s",
+      AJA_NTV2_SDK_VERSION_MAJOR, AJA_NTV2_SDK_VERSION_MINOR,
+      AJA_NTV2_SDK_VERSION_POINT, AJA_NTV2_SDK_BUILD_NUMBER,
+      AJA_NTV2_SDK_BUILD_DATETIME, mDevice.GetDriverVersionString ().c_str ());
+
   // So we can configure each channel separately
   mDevice.SetMultiFormatMode(true);
 
