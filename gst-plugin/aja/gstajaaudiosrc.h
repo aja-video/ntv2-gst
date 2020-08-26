@@ -57,6 +57,7 @@ struct _GstAjaAudioSrc
     guint                       channels;
     guint                       queue_size;
     guint64                     next_offset;
+    gboolean                    had_signal;
 };
 
 struct _GstAjaAudioSrcClass
