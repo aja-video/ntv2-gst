@@ -82,6 +82,7 @@ typedef struct
   AjaAudioBuff *audio_buff;
   GstClockTime capture_time;
   GstClockTime stream_time;
+  gboolean first_buffer;
 } AjaCaptureAudioPacket;
 
 static void
@@ -535,6 +536,7 @@ gst_aja_audio_src_stop (GstAjaAudioSrc * src)
   g_queue_foreach (&src->current_packets, (GFunc) aja_capture_audio_packet_free,
       NULL);
   g_queue_clear (&src->current_packets);
+  src->had_signal = FALSE;
 
   return TRUE;
 }
@@ -558,6 +560,8 @@ gst_aja_audio_src_change_state (GstElement * element, GstStateChange transition)
     case GST_STATE_CHANGE_READY_TO_PAUSED:
     {
       GstElement *videosrc = NULL;
+
+      src->had_signal = FALSE;
 
       // Check if there is a video src for this input too and if it
       // is actually in the same pipeline
@@ -625,6 +629,7 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
 
   // Just return if we have no signal
   if (!audioBuff || !audioBuff->haveSignal) {
+    src->had_signal = FALSE;
     if (audioBuff)
       src->input->ntv2AVHevc->ReleaseAudioBuffer (audioBuff);
     return;
@@ -654,6 +659,7 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
           GST_TIME_FORMAT, GST_TIME_ARGS (stream_time),
           GST_TIME_ARGS (videosrc->skip_first_time + videosrc->first_time));
       g_mutex_unlock (&videosrc->lock);
+      src->had_signal = TRUE;
       src->input->ntv2AVHevc->ReleaseAudioBuffer (audioBuff);
       return;
     }
@@ -689,12 +695,14 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
     f->audio_buff = audioBuff;
     f->capture_time = timestamp;
     f->stream_time = stream_time;
+    f->first_buffer = !src->had_signal;
 
     g_queue_push_tail (&src->current_packets, f);
     g_cond_signal (&src->cond);
   } else {
     src->input->ntv2AVHevc->ReleaseAudioBuffer (audioBuff);
   }
+  src->had_signal = TRUE;
   g_mutex_unlock (&src->lock);
 }
 
@@ -743,6 +751,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
   timestamp = p->capture_time;
   stream_time = p->stream_time;
+  discont = p->first_buffer;
   aja_capture_audio_packet_free (p);
   p = NULL;
 
@@ -759,7 +768,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
   if (src->next_offset == (guint64) - 1) {
     discont = TRUE;
-  } else {
+  } else if (!discont) {
     guint64 diff, max_sample_diff;
 
     // Check discont
