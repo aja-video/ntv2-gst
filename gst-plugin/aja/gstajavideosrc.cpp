@@ -892,7 +892,7 @@ gst_aja_video_src_update_time_mapping (GstAjaVideoSrc * src,
 
     /* At most 5% frame duration change per update */
     max_diff =
-        gst_util_uint64_scale (GST_SECOND / 200, src->info.fps_d,
+        gst_util_uint64_scale (GST_SECOND / 20, src->info.fps_d,
         src->info.fps_n);
 
     GST_DEBUG_OBJECT (src,
