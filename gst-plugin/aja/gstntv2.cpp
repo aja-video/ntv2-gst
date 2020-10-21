@@ -1782,7 +1782,9 @@ NTV2GstAV::ACInputWorker (void)
 
     haveSignal = (effectiveVideoFormat == inputVideoFormat) || (mVideoFormat == inputVideoFormat);
 
-    GST_DEBUG ("Autocirculate state: %d, buffer level %d", acStatus.acState, acStatus.acBufferLevel);
+    GST_DEBUG ("Autocirculate state: %d, buffer level %u, frames processed %u, frames dropped %u",
+               acStatus.acState, acStatus.acBufferLevel,
+               acStatus.acFramesProcessed, acStatus.acFramesDropped);
 
     // wait for captured frame
     if (acStatus.acState == NTV2_AUTOCIRCULATE_RUNNING
