@@ -1180,6 +1180,7 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
   guint32 timecode_high, timecode_low;
   guint8 aja_field_count;
   guint8 *ancillary_data;
+  gboolean discont = false;
 
   if (!gst_aja_video_src_start (src)) {
     return GST_FLOW_NOT_NEGOTIATED;
@@ -1285,6 +1286,7 @@ retry:
   timecode_high = f->video_buff->timeCodeHigh;
   timecode_low = f->video_buff->timeCodeLow;
   ancillary_data = (guint8 *) f->video_buff->pAncillaryData;
+  discont = f->video_buff->discont;
   aja_capture_video_frame_free (f);
   f = NULL;
 
@@ -1297,6 +1299,9 @@ retry:
     if (src->input->mode->isTff)
       GST_BUFFER_FLAG_SET (*buffer, GST_VIDEO_BUFFER_FLAG_TFF);
   }
+
+  if (discont)
+    GST_BUFFER_FLAG_SET (*buffer, GST_BUFFER_FLAG_DISCONT);
 
   if (timecode_valid) {
     uint8_t hours, minutes, seconds, frames;
