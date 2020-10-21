@@ -1520,7 +1520,10 @@ NTV2GstAV::StartACThread (void)
 {
   mACInputThread = new AJAThread ();
   mACInputThread->Attach (ACInputThreadStatic, this);
-  mACInputThread->SetPriority (AJA_ThreadPriority_High);
+  if (mACInputThread->SetPriority (AJA_ThreadPriority_TimeCritical) != AJA_STATUS_SUCCESS) {
+    GST_ERROR ("Failed to set time critical priority for capture thread");
+    mACInputThread->SetPriority (AJA_ThreadPriority_High);
+  }
   mACInputThread->Start ();
 }
 
