@@ -751,7 +751,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
   timestamp = p->capture_time;
   stream_time = p->stream_time;
-  discont = p->first_buffer;
+  discont = p->first_buffer || p->audio_buff->discont;
   aja_capture_audio_packet_free (p);
   p = NULL;
 

@@ -68,11 +68,7 @@ mVideoCallbackRefcon (0),
 mAudioCallback (0),
 mAudioCallbackRefcon (0),
 mAudioBufferPool (NULL),
-mVideoBufferPool (NULL),
-mVideoInputFrameCount (0),
-mVideoOutFrameCount (0),
-mCodecRawFrameCount (0),
-mCodecHevcFrameCount (0), mHevcOutFrameCount (0), mAudioOutFrameCount (0)
+mVideoBufferPool (NULL)
 {
   ::memset (mHevcInputBuffer, 0x0, sizeof (mHevcInputBuffer));
 
@@ -1486,12 +1482,6 @@ NTV2GstAV::SetupAutoCirculate (void)
 
 AJAStatus NTV2GstAV::Run ()
 {
-  mVideoInputFrameCount = 0;
-  mVideoOutFrameCount = 0;
-  mCodecRawFrameCount = 0;
-  mCodecHevcFrameCount = 0;
-  mHevcOutFrameCount = 0;
-  mAudioOutFrameCount = 0;
   mLastFrame = false;
   mLastFrameInput = false;
   mLastFrameVideoOut = false;
@@ -1572,6 +1562,11 @@ NTV2GstAV::ACInputWorker (void)
 
   bool haveSignal = true;
   unsigned int iterations_without_frame = 0;
+
+  uint64_t processed_frames = 0;
+  uint64_t dropped_frames = 0;
+  uint32_t last_dropped_frames = 0;
+  bool dropped_frames_now = false;
 
   while (!mGlobalQuit) {
     AUTOCIRCULATE_STATUS acStatus;
@@ -1786,6 +1781,19 @@ NTV2GstAV::ACInputWorker (void)
                acStatus.acState, acStatus.acBufferLevel,
                acStatus.acFramesProcessed, acStatus.acFramesDropped);
 
+    if (last_dropped_frames != acStatus.acFramesDropped) {
+      if (last_dropped_frames > acStatus.acFramesDropped) {
+        dropped_frames += (G_MAXUINT32 - last_dropped_frames) + acStatus.acFramesDropped;
+      } else {
+        dropped_frames += acStatus.acFramesDropped - last_dropped_frames;
+      }
+
+      last_dropped_frames = acStatus.acFramesDropped;
+      dropped_frames_now = true;
+    }
+
+    GST_DEBUG ("Overall frames captured %" G_GUINT64_FORMAT " dropped %" G_GUINT64_FORMAT, processed_frames + 1, dropped_frames);
+
     // wait for captured frame
     if (acStatus.acState == NTV2_AUTOCIRCULATE_RUNNING
         && acStatus.acBufferLevel > 1) {
@@ -1884,8 +1892,14 @@ NTV2GstAV::ACInputWorker (void)
           mInputTransferStruct.acTransferStatus.
           acFrameStamp.acCurrentFieldCount;
 
-      pVideoData->frameNumber = mVideoInputFrameCount;
-      pAudioData->frameNumber = mVideoInputFrameCount;
+      pVideoData->frameNumber = processed_frames + dropped_frames;
+      pAudioData->frameNumber = processed_frames + dropped_frames;
+
+      if (dropped_frames_now) {
+        pVideoData->discont = true;
+        pAudioData->discont = true;
+        dropped_frames_now = false;
+      }
 
       pVideoData->timeCodeValid = false;
       NTV2_RP188 timeCode;
@@ -2019,25 +2033,25 @@ NTV2GstAV::ACInputWorker (void)
 
         // calculate pts based on 90 Khz clock tick
         uint64_t pts =
-            (uint64_t) mTimeBase.FramesToMicroseconds (mVideoInputFrameCount) *
+            (uint64_t) mTimeBase.FramesToMicroseconds (processed_frames) *
             90000 / 1000000;
 
         // set serial number, pts and picture number
-        pPicData->serialNumber = mVideoInputFrameCount; // can be anything
+        pPicData->serialNumber = processed_frames; // can be anything
         pPicData->ptsValueLow = (uint32_t) (pts & 0xffffffff);
         pPicData->ptsValueHigh = (uint32_t) (pts >> 32);
-        pPicData->pictureNumber = mVideoInputFrameCount + 1;    // must count starting with 1
+        pPicData->pictureNumber = processed_frames + 1;    // must count starting with 1
 
         // set info data size
         pVideoData->infoDataSize = sizeof (HevcPictureData);
       }
 
       if (pVideoData->lastFrame && !mLastFrameInput) {
-        GST_INFO ("Capture last frame number %d", mVideoInputFrameCount);
+        GST_INFO ("Capture last frame number %" G_GUINT64_FORMAT, processed_frames);
         mLastFrameInput = true;
       }
 
-      mVideoInputFrameCount++;
+      processed_frames++;
 
       if (mHevcOutput) {
         mHevcInputCircularBuffer.EndProduceNextBuffer ();
@@ -2048,11 +2062,9 @@ NTV2GstAV::ACInputWorker (void)
           ReleaseVideoBuffer (pVideoData);
 
         if (pVideoData->lastFrame) {
-          GST_INFO ("Video out last frame number %d", mVideoOutFrameCount);
+          GST_INFO ("Video out last frame number %" G_GUINT64_FORMAT, processed_frames);
           mLastFrameVideoOut = true;
         }
-
-        mVideoOutFrameCount++;
       }
 
       // Possible callbacks are not setup yet so make sure we release the buffer if
@@ -2061,10 +2073,9 @@ NTV2GstAV::ACInputWorker (void)
         ReleaseAudioBuffer (pAudioData);
 
       if (pAudioData->lastFrame) {
-        GST_INFO ("Audio out last frame number %d", mAudioOutFrameCount);
+        GST_INFO ("Audio out last frame number %" G_GUINT64_FORMAT, processed_frames);
         mLastFrameAudioOut = true;
       }
-      mAudioOutFrameCount++;
     } else {
       // Either AutoCirculate is not running, or there were no frames available on the device to transfer.
       // Rather than waste CPU cycles spinning, waiting until a frame becomes available, it's far more
@@ -2133,6 +2144,8 @@ NTV2GstAV::CodecRawThreadStatic (AJAThread * pThread, void *pContext)
 void
 NTV2GstAV::CodecRawWorker (void)
 {
+  uint64_t codecRawFrameCount = 0;
+
   while (!mGlobalQuit) {
     // wait for the next raw video frame
     AjaVideoBuff
@@ -2155,7 +2168,7 @@ NTV2GstAV::CodecRawWorker (void)
           mLastFrameVideoOut = true;
         }
 
-        mCodecRawFrameCount++;
+        codecRawFrameCount++;
       }
       // release the raw video frame
       mHevcInputCircularBuffer.EndConsumeNextBuffer ();
@@ -2202,6 +2215,8 @@ NTV2GstAV::CodecHevcThreadStatic (AJAThread * pThread, void *pContext)
 void
 NTV2GstAV::CodecHevcWorker (void)
 {
+  uint64_t hevcOutFrameCount = 0;
+
   while (!mGlobalQuit) {
 
     if (!mLastFrameHevcOut) {
@@ -2231,11 +2246,11 @@ NTV2GstAV::CodecHevcWorker (void)
       }
 
       if (pDstFrame->lastFrame) {
-        GST_INFO ("Hevc out last frame number %d", mHevcOutFrameCount);
+        GST_INFO ("Hevc out last frame number %" G_GUINT64_FORMAT, hevcOutFrameCount);
         mLastFrameHevcOut = true;
       }
 
-      mHevcOutFrameCount++;
+      hevcOutFrameCount++;
     }
   }                             //    loop til quit signaled
 }
