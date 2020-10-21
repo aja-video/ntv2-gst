@@ -1440,39 +1440,17 @@ NTV2GstAV::SetupAutoCirculate (void)
   // figure out correct start/end frame indices, but this causes
   // corrupted output.
   //
-  // Let's assume at least 6 frames per channel here and calculate
-  // our own indices
-  switch (mInputChannel) {
-    case NTV2_CHANNEL1:
-      frameStart = 0;
-      break;
-    case NTV2_CHANNEL2:
-      frameStart = 7;
-      break;
-    case NTV2_CHANNEL3:
-      frameStart = 14;
-      break;
-    case NTV2_CHANNEL4:
-      frameStart = 21;
-      break;
-    case NTV2_CHANNEL5:
-      frameStart = 28;
-      break;
-    case NTV2_CHANNEL6:
-      frameStart = 35;
-      break;
-    case NTV2_CHANNEL7:
-      frameStart = 42;
-      break;
-    case NTV2_CHANNEL8:
-      frameStart = 49;
-      break;
-    default:
-      g_assert_not_reached ();
-      break;
-  }
+  // Let's assume at least 6 frames (15 for UHD) per channel here and
+  // calculate our own indices
 
-  frameEnd = frameStart + 6;
+  if (NTV2_IS_12G_FORMAT (mVideoFormat) ||
+      NTV2_IS_QUAD_FRAME_FORMAT (mVideoFormat) || NTV2_IS_QUAD_QUAD_FORMAT (mVideoFormat)) {
+    frameStart = mInputChannel * 15;
+    frameEnd = frameStart + 14;
+  } else {
+    frameStart = mInputChannel * 7;
+    frameEnd = frameStart + 6;
+  }
 
   mDevice.AutoCirculateStop (mInputChannel);
   mDevice.AutoCirculateInitForInput (mInputChannel, 0,  //    Frames to circulate
