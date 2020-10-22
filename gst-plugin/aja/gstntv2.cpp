@@ -1768,6 +1768,7 @@ NTV2GstAV::ACInputWorker (void)
 
       last_dropped_frames = acStatus.acFramesDropped;
       dropped_frames_now = true;
+      GST_ERROR ("Dropped frames! Captured %" G_GUINT64_FORMAT " dropped %" G_GUINT64_FORMAT, processed_frames + 1, dropped_frames);
     }
 
     GST_DEBUG ("Overall frames captured %" G_GUINT64_FORMAT " dropped %" G_GUINT64_FORMAT, processed_frames + 1, dropped_frames);
