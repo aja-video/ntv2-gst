@@ -31,6 +31,8 @@
 #include "gstajaaudiosink.h"
 #include "gstajadeviceprovider.h"
 
+#include "ajabase/system/memory.h"
+
 GST_DEBUG_CATEGORY_STATIC (gst_aja_debug);
 #define GST_CAT_DEFAULT gst_aja_debug
 
@@ -887,6 +889,227 @@ gst_aja_buffer_get_audio_buff (GstBuffer * buffer)
   return (AjaAudioBuff *)
       gst_mini_object_get_qdata (GST_MINI_OBJECT_CAST (buffer),
       audio_buffer_quark);
+}
+
+typedef struct
+{
+  GstMemory mem;
+
+  guint8 *data;
+} GstAjaMemory;
+
+G_DEFINE_TYPE (GstAjaAllocator, gst_aja_allocator, GST_TYPE_ALLOCATOR);
+
+static inline void
+_aja_memory_init (GstAjaAllocator *alloc, GstAjaMemory * mem, GstMemoryFlags flags,
+    GstMemory * parent, gpointer data, gsize maxsize,
+    gsize offset, gsize size)
+{
+  gst_memory_init (GST_MEMORY_CAST (mem),
+      flags, GST_ALLOCATOR (alloc), parent, maxsize,
+      4095, offset, size);
+
+  mem->data = (guint8 *) data;
+}
+
+static inline GstAjaMemory *
+_aja_memory_new (GstAjaAllocator *alloc, GstMemoryFlags flags, GstAjaMemory * parent,
+    gpointer data, gsize maxsize,
+    gsize offset, gsize size)
+{
+  GstAjaMemory *mem;
+
+  mem = (GstAjaMemory *) g_slice_alloc (sizeof (GstAjaMemory));
+  _aja_memory_init (alloc, mem, flags, (GstMemory *)parent,
+      data, maxsize, offset, size);
+
+  return mem;
+}
+
+static GstAjaMemory *
+_aja_memory_new_block (GstAjaAllocator *alloc, GstMemoryFlags flags,
+    gsize maxsize, gsize offset, gsize size)
+{
+  GstAjaMemory *mem;
+  guint8 *data;
+
+  g_assert (maxsize == alloc->alloc_size);
+
+  mem = (GstAjaMemory *) g_slice_alloc (sizeof (GstAjaMemory));
+
+  GST_OBJECT_LOCK (alloc);
+  data = (guint8 *) gst_queue_array_pop_head (alloc->free_list);
+  if (!data) {
+    alloc->num_allocated++;
+    GST_OBJECT_UNLOCK (alloc);
+    data = (guint8 *) AJAMemory::AllocateAligned (alloc->alloc_size, 4096);
+    GST_DEBUG_OBJECT (alloc, "Allocated %" G_GSIZE_FORMAT " at %p", alloc->alloc_size, data);
+    alloc->device->DMABufferLock((ULWord*)data, alloc->alloc_size);
+  } else {
+    GST_OBJECT_UNLOCK (alloc);
+  }
+
+  _aja_memory_init (alloc, mem, flags, NULL, data, maxsize,
+      offset, size);
+
+  return mem;
+}
+
+static gpointer
+_aja_memory_map (GstAjaMemory * mem, gsize maxsize, GstMapFlags flags)
+{
+  return mem->data;
+}
+
+static gboolean
+_aja_memory_unmap (GstAjaMemory * mem)
+{
+  return TRUE;
+}
+
+static GstMemory *
+_aja_memory_copy (GstAjaMemory * mem, gssize offset, gsize size)
+{
+  GstMemory *copy;
+  GstMapInfo map;
+
+  if (size == (gsize) -1)
+    size = mem->mem.size > (gsize) offset ? mem->mem.size - offset : 0;
+
+  // Create copies in normal system memory
+  copy = gst_allocator_alloc (NULL, size, NULL);
+  gst_memory_map (copy, &map, GST_MAP_READ);
+  GST_DEBUG ("memcpy %" G_GSIZE_FORMAT " memory %p -> %p", size, mem, copy);
+  memcpy (map.data, mem->data + mem->mem.offset + offset, size);
+  gst_memory_unmap (copy, &map);
+
+  return copy;
+}
+
+static GstAjaMemory *
+_aja_memory_share (GstAjaMemory * mem, gssize offset, gsize size)
+{
+  GstAjaMemory *sub;
+  GstAjaMemory *parent;
+
+  /* find the real parent */
+  if ((parent = (GstAjaMemory*) mem->mem.parent) == NULL)
+    parent = (GstAjaMemory *) mem;
+
+  if (size == (gsize) -1)
+    size = mem->mem.size - offset;
+
+  sub =
+      _aja_memory_new (GST_AJA_ALLOCATOR (parent->mem.allocator), (GstMemoryFlags) (GST_MINI_OBJECT_FLAGS (parent) |
+      GST_MINI_OBJECT_FLAG_LOCK_READONLY), parent, parent->data, mem->mem.maxsize,
+      mem->mem.offset + offset, size);
+
+  return sub;
+}
+
+static GstMemory *
+gst_aja_allocator_alloc (GstAllocator * alloc, gsize size,
+    GstAllocationParams * params)
+{
+  g_assert (params->prefix == 0);
+  g_assert (params->padding == 0);
+
+  return (GstMemory *) _aja_memory_new_block (GST_AJA_ALLOCATOR (alloc), params->flags,
+      size, 0, size);
+}
+
+static void
+gst_aja_allocator_free (GstAllocator * alloc, GstMemory * mem)
+{
+  GstAjaMemory *dmem = (GstAjaMemory *) mem;
+
+  if (!mem->parent) {
+    GstAjaAllocator *aja_alloc = GST_AJA_ALLOCATOR (alloc);
+
+    GST_OBJECT_LOCK (alloc);
+    if (gst_queue_array_get_length (aja_alloc->free_list) >= 8 && aja_alloc->num_prealloc < aja_alloc->num_allocated) {
+      aja_alloc->num_allocated--;
+      GST_OBJECT_UNLOCK (alloc);
+      GST_DEBUG_OBJECT (alloc, "Freeing memory at %p", dmem->data);
+      aja_alloc->device->DMABufferUnlock((ULWord*)dmem->data, mem->maxsize);
+      AJAMemory::FreeAligned (dmem->data);
+    } else {
+      gst_queue_array_push_tail (aja_alloc->free_list, (gpointer) dmem->data);
+      GST_OBJECT_UNLOCK (alloc);
+    }
+  }
+
+  g_slice_free1 (sizeof (GstAjaMemory), dmem);
+}
+
+static void
+gst_aja_allocator_finalize (GObject *alloc)
+{
+  GstAjaAllocator *aja_alloc = GST_AJA_ALLOCATOR (alloc);
+  guint8 *data;
+
+  GST_DEBUG_OBJECT (alloc, "Freeing allocator");
+
+  while ((data = (guint8 *) gst_queue_array_pop_head (aja_alloc->free_list))) {
+    GST_DEBUG_OBJECT (alloc, "Freeing memory at %p", data);
+    aja_alloc->device->DMABufferUnlock((ULWord*)data, aja_alloc->alloc_size);
+    AJAMemory::FreeAligned (data);
+  }
+
+  G_OBJECT_CLASS (gst_aja_allocator_parent_class)->finalize (alloc);
+}
+
+static void
+gst_aja_allocator_class_init (GstAjaAllocatorClass * klass)
+{
+  GObjectClass *gobject_class;
+  GstAllocatorClass *allocator_class;
+
+  gobject_class = (GObjectClass *) klass;
+  allocator_class = (GstAllocatorClass *) klass;
+
+  gobject_class->finalize = gst_aja_allocator_finalize;
+
+  allocator_class->alloc = gst_aja_allocator_alloc;
+  allocator_class->free = gst_aja_allocator_free;
+}
+
+static void
+gst_aja_allocator_init (GstAjaAllocator * aja_alloc)
+{
+  GstAllocator *alloc = GST_ALLOCATOR_CAST (aja_alloc);
+
+  alloc->mem_type = GST_ALLOCATOR_SYSMEM;
+  alloc->mem_map = (GstMemoryMapFunction) _aja_memory_map;
+  alloc->mem_unmap = (GstMemoryUnmapFunction) _aja_memory_unmap;
+  alloc->mem_copy = (GstMemoryCopyFunction) _aja_memory_copy;
+  alloc->mem_share = (GstMemoryShareFunction) _aja_memory_share;
+}
+
+GstAllocator *
+gst_aja_allocator_new (CNTV2Card *device, gsize alloc_size, guint num_prealloc)
+{
+  GstAjaAllocator *alloc = (GstAjaAllocator *) g_object_new (GST_TYPE_AJA_ALLOCATOR, NULL);
+  guint i;
+
+  alloc->device = device;
+  alloc->alloc_size = alloc_size;
+  alloc->num_prealloc = num_prealloc;
+
+  GST_DEBUG_OBJECT (alloc, "Creating allocator for size %" G_GSIZE_FORMAT " and %u preallocated", alloc_size, num_prealloc);
+
+  alloc->free_list = gst_queue_array_new (num_prealloc);
+  for (i = 0; i < num_prealloc; i++) {
+    guint8 *data = (guint8 *) AJAMemory::AllocateAligned (alloc->alloc_size, 4096);
+
+    GST_DEBUG_OBJECT (alloc, "Allocated %" G_GSIZE_FORMAT " at %p", alloc_size, data);
+    alloc->device->DMABufferLock((ULWord*)data, alloc->alloc_size);
+
+    gst_queue_array_push_tail (alloc->free_list, (gpointer) data);
+  }
+  alloc->num_allocated = alloc->num_prealloc;
+
+  return GST_ALLOCATOR (alloc);
 }
 
 #ifndef VERSION
