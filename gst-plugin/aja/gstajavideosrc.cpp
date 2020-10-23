@@ -811,7 +811,7 @@ out:
 
 static void
 gst_aja_video_src_update_time_mapping (GstAjaVideoSrc * src,
-    GstClockTime capture_time, GstClockTime stream_time)
+    GstClockTime capture_time, GstClockTime stream_time, gboolean discont)
 {
   if (src->window_skip_count == 0) {
     GstClockTime num, den, b, xbase;
@@ -896,12 +896,12 @@ gst_aja_video_src_update_time_mapping (GstAjaVideoSrc * src,
         src->info.fps_n);
 
     GST_DEBUG_OBJECT (src,
-        "New time mapping causes difference of %" GST_TIME_FORMAT,
-        GST_TIME_ARGS (diff));
+        "New time mapping causes difference of %" GST_TIME_FORMAT "(discont: %d)",
+        GST_TIME_ARGS (diff), discont);
     GST_DEBUG_OBJECT (src, "Maximum allowed per frame %" GST_TIME_FORMAT,
         GST_TIME_ARGS (max_diff));
 
-    if (diff > max_diff) {
+    if (!discont && diff > max_diff && diff < 50 * GST_MSECOND) {
       /* adjust so that we move that much closer */
       if (new_calculated > expected) {
         src->current_time_mapping.b = expected + max_diff;
@@ -1023,7 +1023,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
     return;
   }
 
-  gst_aja_video_src_update_time_mapping (src, capture_pipeline, stream_time);
+  gst_aja_video_src_update_time_mapping (src, capture_pipeline, stream_time, videoBuff->discont);
 
   if (src->output_stream_time) {
     timestamp = stream_time;
