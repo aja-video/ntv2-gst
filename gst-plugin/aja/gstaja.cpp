@@ -799,8 +799,8 @@ gst_aja_buffer_pool_alloc_buffer (GstBufferPool * pool, GstBuffer ** buffer,
       videoBuff->pInfoBuffer = new uint32_t[(sizeof (HevcEncodedInfo) * 2) / 4];
       videoBuff->infoBufferSize = sizeof (HevcEncodedInfo) * 2;
     } else {
-      videoBuff->pInfoBuffer = new uint32_t[(sizeof (HevcPictureInfo) * 2) / 4];
-      videoBuff->infoBufferSize = sizeof (HevcPictureInfo) * 2;
+      videoBuff->pInfoBuffer = NULL;
+      videoBuff->infoBufferSize = 0;
     }
     videoBuff->pVideoBuffer = NULL;
     videoBuff->videoBufferSize = 0;
