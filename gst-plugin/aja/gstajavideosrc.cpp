@@ -269,6 +269,10 @@ gst_aja_video_src_init (GstAjaVideoSrc * src)
   g_cond_init (&src->cond);
 
   g_queue_init (&src->current_frames);
+
+  src->skipped_last = 0;
+  src->skip_from_timestamp = GST_CLOCK_TIME_NONE;
+  src->skip_to_timestamp = GST_CLOCK_TIME_NONE;
 }
 
 void
@@ -471,6 +475,10 @@ gst_aja_video_src_start (GstAjaVideoSrc *src)
   if (src->input->start_streams)
     src->input->start_streams (src->input->videosrc);
   g_mutex_unlock (&src->input->lock);
+
+  src->skipped_last = 0;
+  src->skip_from_timestamp = GST_CLOCK_TIME_NONE;
+  src->skip_to_timestamp = GST_CLOCK_TIME_NONE;
 
   return TRUE;
 }
@@ -1039,6 +1047,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
   if (!src->flushing) {
     AjaCaptureVideoFrame *f;
     SignalChange signal_change = NO_CHANGE;
+    guint skipped_frames = 0;
 
     while (g_queue_get_length (&src->current_frames) >= src->queue_size) {
       f = (AjaCaptureVideoFrame *) g_queue_pop_head (&src->current_frames);
@@ -1048,11 +1057,33 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
           || f->signal_change == RECOVERED_SIGNAL)
         signal_change = f->signal_change;
       if (f->video_buff) {
-        GST_WARNING_OBJECT (src, "Dropping old frame at %" GST_TIME_FORMAT,
-            GST_TIME_ARGS (f->capture_time));
+        if (skipped_frames == 0 && src->skipped_last == 0)
+          src->skip_from_timestamp = f->capture_time;
+        skipped_frames++;
+        src->skip_to_timestamp = f->capture_time;
       }
       aja_capture_video_frame_free (f);
     }
+
+    if (src->skipped_last == 0 && skipped_frames > 0) {
+      GST_WARNING_OBJECT (src, "Starting to drop frames");
+    }
+
+    if (skipped_frames == 0 && src->skipped_last > 0) {
+      GST_ELEMENT_WARNING_WITH_DETAILS (src,
+          STREAM, FAILED,
+          ("Dropped %u old frames from %" GST_TIME_FORMAT " to %"
+          GST_TIME_FORMAT, src->skipped_last,
+          GST_TIME_ARGS (src->skip_from_timestamp),
+          GST_TIME_ARGS (src->skip_to_timestamp)),
+          (NULL),
+          ("dropped", G_TYPE_UINT, src->skipped_last,
+           "from", G_TYPE_UINT64, src->skip_from_timestamp,
+           "to", G_TYPE_UINT64, src->skip_to_timestamp, NULL));
+      src->skipped_last = 0;
+    }
+
+    src->skipped_last += skipped_frames;
 
     // Write the GOT_SIGNAL change into the oldest frame again
     if (signal_change != NO_CHANGE) {
