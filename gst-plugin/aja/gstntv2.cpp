@@ -1371,6 +1371,7 @@ NTV2GstAV::SetupHostBuffers (void)
     }
   }
 
+  mDevice.DMABufferAutoLock(false, true, 0);
   GstAllocator *video_alloc = gst_aja_allocator_new(&mDevice, mVideoBufferSize, VIDEO_ARRAY_SIZE);
 
   // These video buffers are actually passed out of this class so we need to assign them unique numbers
