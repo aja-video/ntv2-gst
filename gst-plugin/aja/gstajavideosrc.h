@@ -96,6 +96,7 @@ struct _GstAjaVideoSrc
     gboolean next_time_mapping_pending;
 
     guint skipped_last;
+    guint64 skipped_overall;
     GstClockTime skip_from_timestamp;
     GstClockTime skip_to_timestamp;
 };

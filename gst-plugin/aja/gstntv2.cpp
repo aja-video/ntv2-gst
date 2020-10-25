@@ -1883,9 +1883,13 @@ NTV2GstAV::ACInputWorker (void)
       pVideoData->frameNumber = processed_frames + dropped_frames;
       pAudioData->frameNumber = processed_frames + dropped_frames;
 
+      pVideoData->framesProcessed = processed_frames + 1;
+      pAudioData->framesProcessed = processed_frames + 1;
+      pVideoData->framesDropped = dropped_frames;
+      pAudioData->framesDropped = dropped_frames;
+      pVideoData->droppedChanged = dropped_frames_now;
+      pAudioData->droppedChanged = dropped_frames_now;
       if (dropped_frames_now) {
-        pVideoData->discont = true;
-        pAudioData->discont = true;
         dropped_frames_now = false;
       }
 

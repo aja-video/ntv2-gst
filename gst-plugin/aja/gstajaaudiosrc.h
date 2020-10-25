@@ -60,6 +60,7 @@ struct _GstAjaAudioSrc
     gboolean                    had_signal;
 
     guint skipped_last;
+    guint64 skipped_overall;
     GstClockTime skip_from_timestamp;
     GstClockTime skip_to_timestamp;
 };

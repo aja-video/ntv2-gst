@@ -271,6 +271,7 @@ gst_aja_video_src_init (GstAjaVideoSrc * src)
   g_queue_init (&src->current_frames);
 
   src->skipped_last = 0;
+  src->skipped_overall = 0;
   src->skip_from_timestamp = GST_CLOCK_TIME_NONE;
   src->skip_to_timestamp = GST_CLOCK_TIME_NONE;
 }
@@ -477,6 +478,7 @@ gst_aja_video_src_start (GstAjaVideoSrc *src)
   g_mutex_unlock (&src->input->lock);
 
   src->skipped_last = 0;
+  src->skipped_overall = 0;
   src->skip_from_timestamp = GST_CLOCK_TIME_NONE;
   src->skip_to_timestamp = GST_CLOCK_TIME_NONE;
 
@@ -1031,7 +1033,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
     return;
   }
 
-  gst_aja_video_src_update_time_mapping (src, capture_pipeline, stream_time, videoBuff->discont);
+  gst_aja_video_src_update_time_mapping (src, capture_pipeline, stream_time, videoBuff->droppedChanged);
 
   if (src->output_stream_time) {
     timestamp = stream_time;
@@ -1048,6 +1050,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
     AjaCaptureVideoFrame *f;
     SignalChange signal_change = NO_CHANGE;
     guint skipped_frames = 0;
+    gboolean skipped_before = FALSE;
 
     while (g_queue_get_length (&src->current_frames) >= src->queue_size) {
       f = (AjaCaptureVideoFrame *) g_queue_pop_head (&src->current_frames);
@@ -1080,7 +1083,9 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
           ("dropped", G_TYPE_UINT, src->skipped_last,
            "from", G_TYPE_UINT64, src->skip_from_timestamp,
            "to", G_TYPE_UINT64, src->skip_to_timestamp, NULL));
+      src->skipped_overall += src->skipped_last;
       src->skipped_last = 0;
+      skipped_before = TRUE;
     }
 
     src->skipped_last += skipped_frames;
@@ -1099,6 +1104,9 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
     f->stream_time = stream_time;
     f->mode = src->modeEnum;
     f->signal_change = NO_CHANGE;
+
+    if (skipped_before)
+      videoBuff->droppedChanged = true;
 
     g_queue_push_tail (&src->current_frames, f);
     g_cond_signal (&src->cond);
@@ -1317,7 +1325,24 @@ retry:
   timecode_high = f->video_buff->timeCodeHigh;
   timecode_low = f->video_buff->timeCodeLow;
   ancillary_data = (guint8 *) f->video_buff->pAncillaryData;
-  discont = f->video_buff->discont;
+  discont = f->video_buff->droppedChanged;
+
+  if (f->video_buff->droppedChanged) {
+    GstMessage *msg;
+    GstClockTime running_time;
+
+    running_time = gst_segment_to_running_time (&GST_BASE_SRC (src)->segment,
+        GST_FORMAT_TIME, capture_time);
+
+    msg = gst_message_new_qos (GST_OBJECT (src), TRUE, running_time, f->stream_time,
+        f->capture_time, gst_util_uint64_scale_int (GST_SECOND,
+      src->input->mode->fps_d, src->input->mode->fps_n));
+    gst_message_set_qos_stats (msg, GST_FORMAT_BUFFERS,
+                               f->video_buff->framesProcessed - src->skipped_overall,
+                               f->video_buff->framesDropped + src->skipped_overall);
+    gst_element_post_message (GST_ELEMENT (src), msg);
+  }
+
   aja_capture_video_frame_free (f);
   f = NULL;
 
