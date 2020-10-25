@@ -944,7 +944,9 @@ _aja_memory_new_block (GstAjaAllocator *alloc, GstMemoryFlags flags,
     GST_OBJECT_UNLOCK (alloc);
     data = (guint8 *) AJAMemory::AllocateAligned (alloc->alloc_size, 4096);
     GST_DEBUG_OBJECT (alloc, "Allocated %" G_GSIZE_FORMAT " at %p", alloc->alloc_size, data);
-    alloc->device->DMABufferLock((ULWord*)data, alloc->alloc_size);
+    if (!alloc->device->DMABufferLock((ULWord*)data, alloc->alloc_size, true)) {
+      GST_WARNING_OBJECT (alloc, "Failed to pre-lock memory");
+    }
   } else {
     GST_OBJECT_UNLOCK (alloc);
   }
@@ -1103,7 +1105,9 @@ gst_aja_allocator_new (CNTV2Card *device, gsize alloc_size, guint num_prealloc)
     guint8 *data = (guint8 *) AJAMemory::AllocateAligned (alloc->alloc_size, 4096);
 
     GST_DEBUG_OBJECT (alloc, "Allocated %" G_GSIZE_FORMAT " at %p", alloc_size, data);
-    alloc->device->DMABufferLock((ULWord*)data, alloc->alloc_size);
+    if (!alloc->device->DMABufferLock((ULWord*)data, alloc->alloc_size, true)) {
+      GST_WARNING_OBJECT (alloc, "Failed to pre-lock memory");
+    }
 
     gst_queue_array_push_tail (alloc->free_list, (gpointer) data);
   }
