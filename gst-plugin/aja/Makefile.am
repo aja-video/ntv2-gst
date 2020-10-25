@@ -1,6 +1,7 @@
 plugin_LTLIBRARIES = libgstaja.la
 
 libgstaja_la_CPPFLAGS = \
+	-std=c++11 \
 	$(GST_PLUGINS_BAD_CFLAGS) \
 	$(GST_PLUGINS_BASE_CFLAGS) \
 	$(GST_BASE_CFLAGS) \
@@ -26,7 +27,7 @@ libgstaja_la_LIBADD = \
 	$(GST_LIBS) \
 	$(LIBM)
 
-libgstaja_la_LDFLAGS = $(GST_PLUGIN_LDFLAGS)
+libgstaja_la_LDFLAGS = -std=c++11 $(GST_PLUGIN_LDFLAGS)
 libgstaja_la_LIBTOOLFLAGS = $(GST_PLUGIN_LIBTOOLFLAGS)
 
 # sources used to compile this plug-in

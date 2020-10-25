@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <semaphore.h>
 #include <fcntl.h>
+#include <string>
 
 #include "gstntv2.h"
 #include "gstaja.h"
@@ -34,7 +35,7 @@ _init_ntv2_debug (void)
 #endif
 }
 
-NTV2GstAV::NTV2GstAV (const string inDeviceSpecifier,
+NTV2GstAV::NTV2GstAV (const std::string inDeviceSpecifier,
     const NTV2Channel inChannel)
 
 :
@@ -1159,7 +1160,7 @@ AJAStatus NTV2GstAV::SetupVideo (void)
 
   // Enable routes
   {
-    stringstream os;
+    std::stringstream os;
     CNTV2SignalRouter oldRouter;
     mDevice.GetRouting(oldRouter);
     oldRouter.Print(os);
@@ -1167,7 +1168,7 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   }
   mDevice.ApplySignalRoute (router, true);
   {
-    stringstream os;
+    std::stringstream os;
     CNTV2SignalRouter currentRouter;
     mDevice.GetRouting(currentRouter);
     currentRouter.Print(os);
@@ -1815,7 +1816,7 @@ NTV2GstAV::ACInputWorker (void)
         NTV2FrameGeometry currentGeometry;
         gsize offset = 0;       // Offset in number of lines
 
-        mDevice.GetFrameGeometry (&currentGeometry);
+        mDevice.GetFrameGeometry (currentGeometry);
         switch (currentGeometry) {
           case NTV2_FG_1920x1112:
             // 32 line offset
@@ -2313,8 +2314,7 @@ bool NTV2GstAV::GetHardwareClock (uint64_t desiredTimeScale, uint64_t * time)
   uint32_t
   audioCounter (0);
 
-  bool
-      status = mDevice.ReadRegister (kRegAud1Counter, &audioCounter);
+  bool status = mDevice.ReadRegister (kRegAud1Counter, audioCounter);
   *time = (audioCounter * desiredTimeScale) / 48000;
   return status;
 }
