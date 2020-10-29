@@ -58,6 +58,11 @@ struct _GstAjaAudioSrc
     guint                       queue_size;
     guint64                     next_offset;
     gboolean                    had_signal;
+
+    guint skipped_last;
+    guint64 skipped_overall;
+    GstClockTime skip_from_timestamp;
+    GstClockTime skip_to_timestamp;
 };
 
 struct _GstAjaAudioSrcClass

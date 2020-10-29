@@ -58,7 +58,7 @@ typedef struct
     uint32_t        infoBufferSize;         /// Size of the host information buffer (bytes)
     uint32_t        infoDataSize;           /// Size of the information data (bytes)
 
-    uint32_t        frameNumber;            /// Frame number
+    uint64_t        frameNumber;            /// Frame number
     uint8_t         fieldCount;             /// Number of fields
     bool            timeCodeValid;
     uint32_t        timeCodeDBB;            /// Time code data dbb
@@ -71,6 +71,10 @@ typedef struct
     uint8_t         transferCharacteristics; /// SDR-TV (0), HLG (1), PQ (2), unspecified (3)
     uint8_t         colorimetry;             /// Rec 709 (0), VANC (1), UHDTV (2), unspecified (3)
     bool            fullRange;               /// 0-255 if true, 16-235 otherwise
+
+    uint64_t        framesProcessed;
+    uint64_t        framesDropped;
+    bool            droppedChanged;
 } AjaVideoBuff;
 
 
@@ -86,6 +90,10 @@ typedef struct
     uint64_t        timeStamp;              /// Time stamp of video data
     bool            lastFrame;              /// Indicates last captured frame
     bool            haveSignal;             /// true if we actually have signal
+
+    uint64_t        framesProcessed;
+    uint64_t        framesDropped;
+    bool            droppedChanged;
 } AjaAudioBuff;
 
         
@@ -366,13 +374,6 @@ class NTV2GstAV
 
         AUTOCIRCULATE_TRANSFER        mInputTransferStruct;                                    ///    My A/C input transfer info
     
-        uint32_t                    mVideoInputFrameCount;                                  /// Input thread frame counter
-        uint32_t                    mVideoOutFrameCount;                                    /// Video output frame counter
-        uint32_t                    mCodecRawFrameCount;                                    /// Raw thread frame counter
-        uint32_t                    mCodecHevcFrameCount;                                   /// HEVC thread frame counter
-        uint32_t                    mHevcOutFrameCount;                                     /// Hevc output frame counter
-        uint32_t                    mAudioOutFrameCount;                                    /// Audio output frame counter
-
         AJATimeBase                 mTimeBase;                                              /// Timebase for timecode string
 
 };    //    NTV2EncodeHEVC

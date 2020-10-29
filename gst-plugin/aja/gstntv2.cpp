@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <semaphore.h>
 #include <fcntl.h>
+#include <string>
 
 #include "gstntv2.h"
 #include "gstaja.h"
@@ -34,7 +35,7 @@ _init_ntv2_debug (void)
 #endif
 }
 
-NTV2GstAV::NTV2GstAV (const string inDeviceSpecifier,
+NTV2GstAV::NTV2GstAV (const std::string inDeviceSpecifier,
     const NTV2Channel inChannel)
 
 :
@@ -68,11 +69,7 @@ mVideoCallbackRefcon (0),
 mAudioCallback (0),
 mAudioCallbackRefcon (0),
 mAudioBufferPool (NULL),
-mVideoBufferPool (NULL),
-mVideoInputFrameCount (0),
-mVideoOutFrameCount (0),
-mCodecRawFrameCount (0),
-mCodecHevcFrameCount (0), mHevcOutFrameCount (0), mAudioOutFrameCount (0)
+mVideoBufferPool (NULL)
 {
   ::memset (mHevcInputBuffer, 0x0, sizeof (mHevcInputBuffer));
 
@@ -1163,7 +1160,7 @@ AJAStatus NTV2GstAV::SetupVideo (void)
 
   // Enable routes
   {
-    stringstream os;
+    std::stringstream os;
     CNTV2SignalRouter oldRouter;
     mDevice.GetRouting(oldRouter);
     oldRouter.Print(os);
@@ -1171,7 +1168,7 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   }
   mDevice.ApplySignalRoute (router, true);
   {
-    stringstream os;
+    std::stringstream os;
     CNTV2SignalRouter currentRouter;
     mDevice.GetRouting(currentRouter);
     currentRouter.Print(os);
@@ -1373,26 +1370,34 @@ NTV2GstAV::SetupHostBuffers (void)
       mHevcInputCircularBuffer.Add (&mHevcInputBuffer[bufferNdx]);
     }
   }
+
+  mDevice.DMABufferAutoLock(false, true, 0);
+  GstAllocator *video_alloc = gst_aja_allocator_new(&mDevice, mVideoBufferSize, VIDEO_ARRAY_SIZE);
+
   // These video buffers are actually passed out of this class so we need to assign them unique numbers
   // so they can be tracked and also they have a state
   mVideoBufferPool = gst_aja_buffer_pool_new ();
   GstStructure *config = gst_buffer_pool_get_config (mVideoBufferPool);
   gst_buffer_pool_config_set_params (config, NULL, mVideoBufferSize,
       VIDEO_ARRAY_SIZE, 0);
+  gst_buffer_pool_config_set_allocator (config, video_alloc, NULL);
   gst_structure_set (config, "is-video", G_TYPE_BOOLEAN, TRUE, "is-hevc",
       G_TYPE_BOOLEAN, mHevcOutput, NULL);
   gst_buffer_pool_set_config (mVideoBufferPool, config);
   gst_buffer_pool_set_active (mVideoBufferPool, TRUE);
+  gst_object_unref (video_alloc);
 
+  GstAllocator *audio_alloc = gst_aja_allocator_new(&mDevice, mAudioBufferSize, AUDIO_ARRAY_SIZE);
   mAudioBufferPool = gst_aja_buffer_pool_new ();
   config = gst_buffer_pool_get_config (mAudioBufferPool);
   gst_buffer_pool_config_set_params (config, NULL, mAudioBufferSize,
       AUDIO_ARRAY_SIZE, 0);
+  gst_buffer_pool_config_set_allocator (config, audio_alloc, NULL);
   gst_structure_set (config, "is-video", G_TYPE_BOOLEAN, FALSE, "is-hevc",
       G_TYPE_BOOLEAN, FALSE, NULL);
   gst_buffer_pool_set_config (mAudioBufferPool, config);
   gst_buffer_pool_set_active (mAudioBufferPool, TRUE);
-
+  gst_object_unref (audio_alloc);
 }                               //    SetupHostBuffers
 
 
@@ -1440,39 +1445,17 @@ NTV2GstAV::SetupAutoCirculate (void)
   // figure out correct start/end frame indices, but this causes
   // corrupted output.
   //
-  // Let's assume at least 6 frames per channel here and calculate
-  // our own indices
-  switch (mInputChannel) {
-    case NTV2_CHANNEL1:
-      frameStart = 0;
-      break;
-    case NTV2_CHANNEL2:
-      frameStart = 7;
-      break;
-    case NTV2_CHANNEL3:
-      frameStart = 14;
-      break;
-    case NTV2_CHANNEL4:
-      frameStart = 21;
-      break;
-    case NTV2_CHANNEL5:
-      frameStart = 28;
-      break;
-    case NTV2_CHANNEL6:
-      frameStart = 35;
-      break;
-    case NTV2_CHANNEL7:
-      frameStart = 42;
-      break;
-    case NTV2_CHANNEL8:
-      frameStart = 49;
-      break;
-    default:
-      g_assert_not_reached ();
-      break;
-  }
+  // Let's assume at least 6 frames (15 for UHD) per channel here and
+  // calculate our own indices
 
-  frameEnd = frameStart + 6;
+  if (NTV2_IS_12G_FORMAT (mVideoFormat) ||
+      NTV2_IS_QUAD_FRAME_FORMAT (mVideoFormat) || NTV2_IS_QUAD_QUAD_FORMAT (mVideoFormat)) {
+    frameStart = mInputChannel * 15;
+    frameEnd = frameStart + 14;
+  } else {
+    frameStart = mInputChannel * 7;
+    frameEnd = frameStart + 6;
+  }
 
   mDevice.AutoCirculateStop (mInputChannel);
   mDevice.AutoCirculateInitForInput (mInputChannel, 0,  //    Frames to circulate
@@ -1486,12 +1469,6 @@ NTV2GstAV::SetupAutoCirculate (void)
 
 AJAStatus NTV2GstAV::Run ()
 {
-  mVideoInputFrameCount = 0;
-  mVideoOutFrameCount = 0;
-  mCodecRawFrameCount = 0;
-  mCodecHevcFrameCount = 0;
-  mHevcOutFrameCount = 0;
-  mAudioOutFrameCount = 0;
   mLastFrame = false;
   mLastFrameInput = false;
   mLastFrameVideoOut = false;
@@ -1572,6 +1549,11 @@ NTV2GstAV::ACInputWorker (void)
 
   bool haveSignal = true;
   unsigned int iterations_without_frame = 0;
+
+  uint64_t processed_frames = 0;
+  uint64_t dropped_frames = 0;
+  uint32_t last_dropped_frames = 0;
+  bool dropped_frames_now = false;
 
   while (!mGlobalQuit) {
     AUTOCIRCULATE_STATUS acStatus;
@@ -1782,7 +1764,23 @@ NTV2GstAV::ACInputWorker (void)
 
     haveSignal = (effectiveVideoFormat == inputVideoFormat) || (mVideoFormat == inputVideoFormat);
 
-    GST_DEBUG ("Autocirculate state: %d, buffer level %d", acStatus.acState, acStatus.acBufferLevel);
+    GST_DEBUG ("Autocirculate state: %d, buffer level %u, frames processed %u, frames dropped %u",
+               acStatus.acState, acStatus.acBufferLevel,
+               acStatus.acFramesProcessed, acStatus.acFramesDropped);
+
+    if (last_dropped_frames != acStatus.acFramesDropped) {
+      if (last_dropped_frames > acStatus.acFramesDropped) {
+        dropped_frames += (G_MAXUINT32 - last_dropped_frames) + acStatus.acFramesDropped;
+      } else {
+        dropped_frames += acStatus.acFramesDropped - last_dropped_frames;
+      }
+
+      last_dropped_frames = acStatus.acFramesDropped;
+      dropped_frames_now = true;
+      GST_ERROR ("Dropped frames! Captured %" G_GUINT64_FORMAT " dropped %" G_GUINT64_FORMAT, processed_frames + 1, dropped_frames);
+    }
+
+    GST_DEBUG ("Overall frames captured %" G_GUINT64_FORMAT " dropped %" G_GUINT64_FORMAT, processed_frames + 1, dropped_frames);
 
     // wait for captured frame
     if (acStatus.acState == NTV2_AUTOCIRCULATE_RUNNING
@@ -1826,7 +1824,7 @@ NTV2GstAV::ACInputWorker (void)
         NTV2FrameGeometry currentGeometry;
         gsize offset = 0;       // Offset in number of lines
 
-        mDevice.GetFrameGeometry (&currentGeometry);
+        mDevice.GetFrameGeometry (currentGeometry);
         switch (currentGeometry) {
           case NTV2_FG_1920x1112:
             // 32 line offset
@@ -1882,8 +1880,18 @@ NTV2GstAV::ACInputWorker (void)
           mInputTransferStruct.acTransferStatus.
           acFrameStamp.acCurrentFieldCount;
 
-      pVideoData->frameNumber = mVideoInputFrameCount;
-      pAudioData->frameNumber = mVideoInputFrameCount;
+      pVideoData->frameNumber = processed_frames + dropped_frames;
+      pAudioData->frameNumber = processed_frames + dropped_frames;
+
+      pVideoData->framesProcessed = processed_frames + 1;
+      pAudioData->framesProcessed = processed_frames + 1;
+      pVideoData->framesDropped = dropped_frames;
+      pAudioData->framesDropped = dropped_frames;
+      pVideoData->droppedChanged = dropped_frames_now;
+      pAudioData->droppedChanged = dropped_frames_now;
+      if (dropped_frames_now) {
+        dropped_frames_now = false;
+      }
 
       pVideoData->timeCodeValid = false;
       NTV2_RP188 timeCode;
@@ -2017,25 +2025,25 @@ NTV2GstAV::ACInputWorker (void)
 
         // calculate pts based on 90 Khz clock tick
         uint64_t pts =
-            (uint64_t) mTimeBase.FramesToMicroseconds (mVideoInputFrameCount) *
+            (uint64_t) mTimeBase.FramesToMicroseconds (processed_frames) *
             90000 / 1000000;
 
         // set serial number, pts and picture number
-        pPicData->serialNumber = mVideoInputFrameCount; // can be anything
+        pPicData->serialNumber = processed_frames; // can be anything
         pPicData->ptsValueLow = (uint32_t) (pts & 0xffffffff);
         pPicData->ptsValueHigh = (uint32_t) (pts >> 32);
-        pPicData->pictureNumber = mVideoInputFrameCount + 1;    // must count starting with 1
+        pPicData->pictureNumber = processed_frames + 1;    // must count starting with 1
 
         // set info data size
         pVideoData->infoDataSize = sizeof (HevcPictureData);
       }
 
       if (pVideoData->lastFrame && !mLastFrameInput) {
-        GST_INFO ("Capture last frame number %d", mVideoInputFrameCount);
+        GST_INFO ("Capture last frame number %" G_GUINT64_FORMAT, processed_frames);
         mLastFrameInput = true;
       }
 
-      mVideoInputFrameCount++;
+      processed_frames++;
 
       if (mHevcOutput) {
         mHevcInputCircularBuffer.EndProduceNextBuffer ();
@@ -2046,11 +2054,9 @@ NTV2GstAV::ACInputWorker (void)
           ReleaseVideoBuffer (pVideoData);
 
         if (pVideoData->lastFrame) {
-          GST_INFO ("Video out last frame number %d", mVideoOutFrameCount);
+          GST_INFO ("Video out last frame number %" G_GUINT64_FORMAT, processed_frames);
           mLastFrameVideoOut = true;
         }
-
-        mVideoOutFrameCount++;
       }
 
       // Possible callbacks are not setup yet so make sure we release the buffer if
@@ -2059,10 +2065,9 @@ NTV2GstAV::ACInputWorker (void)
         ReleaseAudioBuffer (pAudioData);
 
       if (pAudioData->lastFrame) {
-        GST_INFO ("Audio out last frame number %d", mAudioOutFrameCount);
+        GST_INFO ("Audio out last frame number %" G_GUINT64_FORMAT, processed_frames);
         mLastFrameAudioOut = true;
       }
-      mAudioOutFrameCount++;
     } else {
       // Either AutoCirculate is not running, or there were no frames available on the device to transfer.
       // Rather than waste CPU cycles spinning, waiting until a frame becomes available, it's far more
@@ -2131,6 +2136,8 @@ NTV2GstAV::CodecRawThreadStatic (AJAThread * pThread, void *pContext)
 void
 NTV2GstAV::CodecRawWorker (void)
 {
+  uint64_t codecRawFrameCount = 0;
+
   while (!mGlobalQuit) {
     // wait for the next raw video frame
     AjaVideoBuff
@@ -2153,7 +2160,7 @@ NTV2GstAV::CodecRawWorker (void)
           mLastFrameVideoOut = true;
         }
 
-        mCodecRawFrameCount++;
+        codecRawFrameCount++;
       }
       // release the raw video frame
       mHevcInputCircularBuffer.EndConsumeNextBuffer ();
@@ -2200,6 +2207,8 @@ NTV2GstAV::CodecHevcThreadStatic (AJAThread * pThread, void *pContext)
 void
 NTV2GstAV::CodecHevcWorker (void)
 {
+  uint64_t hevcOutFrameCount = 0;
+
   while (!mGlobalQuit) {
 
     if (!mLastFrameHevcOut) {
@@ -2229,11 +2238,11 @@ NTV2GstAV::CodecHevcWorker (void)
       }
 
       if (pDstFrame->lastFrame) {
-        GST_INFO ("Hevc out last frame number %d", mHevcOutFrameCount);
+        GST_INFO ("Hevc out last frame number %" G_GUINT64_FORMAT, hevcOutFrameCount);
         mLastFrameHevcOut = true;
       }
 
-      mHevcOutFrameCount++;
+      hevcOutFrameCount++;
     }
   }                             //    loop til quit signaled
 }
@@ -2317,8 +2326,7 @@ bool NTV2GstAV::GetHardwareClock (uint64_t desiredTimeScale, uint64_t * time)
   uint32_t
   audioCounter (0);
 
-  bool
-      status = mDevice.ReadRegister (kRegAud1Counter, &audioCounter);
+  bool status = mDevice.ReadRegister (kRegAud1Counter, audioCounter);
   *time = (audioCounter * desiredTimeScale) / 48000;
   return status;
 }

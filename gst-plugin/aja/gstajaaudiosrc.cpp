@@ -234,6 +234,11 @@ gst_aja_audio_src_init (GstAjaAudioSrc * src)
   g_cond_init (&src->cond);
 
   g_queue_init (&src->current_packets);
+
+  src->skipped_last = 0;
+  src->skipped_overall = 0;
+  src->skip_from_timestamp = GST_CLOCK_TIME_NONE;
+  src->skip_to_timestamp = GST_CLOCK_TIME_NONE;
 }
 
 void
@@ -370,6 +375,11 @@ gst_aja_audio_src_start (GstAjaAudioSrc *src)
     return FALSE;
   }
   gst_caps_unref (caps);
+
+  src->skipped_last = 0;
+  src->skipped_overall = 0;
+  src->skip_from_timestamp = GST_CLOCK_TIME_NONE;
+  src->skip_to_timestamp = GST_CLOCK_TIME_NONE;
 
   return TRUE;
 }
@@ -682,13 +692,45 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
   g_mutex_lock (&src->lock);
   if (!src->flushing) {
     AjaCaptureAudioPacket *f;
+    guint skipped_frames = 0;
+    gboolean skipped_before = FALSE;
 
     while (g_queue_get_length (&src->current_packets) >= src->queue_size) {
       f = (AjaCaptureAudioPacket *) g_queue_pop_head (&src->current_packets);
       GST_WARNING_OBJECT (src, "Dropping old packet at %" GST_TIME_FORMAT,
           GST_TIME_ARGS (f->capture_time));
+
+      if (f->audio_buff) {
+        if (skipped_frames == 0 && src->skipped_last == 0)
+          src->skip_from_timestamp = f->capture_time;
+        skipped_frames++;
+        src->skip_to_timestamp = f->capture_time;
+      }
+
       aja_capture_audio_packet_free (f);
     }
+
+    if (src->skipped_last == 0 && skipped_frames > 0) {
+      GST_WARNING_OBJECT (src, "Starting to drop frames");
+    }
+
+    if (skipped_frames == 0 && src->skipped_last > 0) {
+      GST_ELEMENT_WARNING_WITH_DETAILS (src,
+          STREAM, FAILED,
+          ("Dropped %u old frames from %" GST_TIME_FORMAT " to %"
+          GST_TIME_FORMAT, src->skipped_last,
+          GST_TIME_ARGS (src->skip_from_timestamp),
+          GST_TIME_ARGS (src->skip_to_timestamp)),
+          (NULL),
+          ("dropped", G_TYPE_UINT, src->skipped_last,
+           "from", G_TYPE_UINT64, src->skip_from_timestamp,
+           "to", G_TYPE_UINT64, src->skip_to_timestamp, NULL));
+      src->skipped_overall += src->skipped_last;
+      src->skipped_last = 0;
+      skipped_before = TRUE;
+    }
+
+    src->skipped_last += skipped_frames;
 
     f = (AjaCaptureAudioPacket *) g_malloc0 (sizeof (AjaCaptureAudioPacket));
     f->audio_src = src;
@@ -696,6 +738,8 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
     f->capture_time = timestamp;
     f->stream_time = stream_time;
     f->first_buffer = !src->had_signal;
+    if (skipped_before)
+      audioBuff->droppedChanged = TRUE;
 
     g_queue_push_tail (&src->current_packets, f);
     g_cond_signal (&src->cond);
@@ -751,7 +795,24 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
   timestamp = p->capture_time;
   stream_time = p->stream_time;
-  discont = p->first_buffer;
+  discont = p->first_buffer || p->audio_buff->droppedChanged;
+
+  if (p->audio_buff->droppedChanged) {
+    GstMessage *msg;
+    GstClockTime running_time;
+
+    running_time = gst_segment_to_running_time (&GST_BASE_SRC (src)->segment,
+        GST_FORMAT_TIME, p->capture_time);
+
+    msg = gst_message_new_qos (GST_OBJECT (src), TRUE, running_time, p->stream_time,
+        p->capture_time, gst_util_uint64_scale_int (GST_SECOND,
+      src->input->mode->fps_d, src->input->mode->fps_n));
+    gst_message_set_qos_stats (msg, GST_FORMAT_BUFFERS,
+                               p->audio_buff->framesProcessed - src->skipped_overall,
+                               p->audio_buff->framesDropped + src->skipped_overall);
+    gst_element_post_message (GST_ELEMENT (src), msg);
+  }
+
   aja_capture_audio_packet_free (p);
   p = NULL;
 

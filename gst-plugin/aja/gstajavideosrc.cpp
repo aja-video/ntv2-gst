@@ -269,6 +269,11 @@ gst_aja_video_src_init (GstAjaVideoSrc * src)
   g_cond_init (&src->cond);
 
   g_queue_init (&src->current_frames);
+
+  src->skipped_last = 0;
+  src->skipped_overall = 0;
+  src->skip_from_timestamp = GST_CLOCK_TIME_NONE;
+  src->skip_to_timestamp = GST_CLOCK_TIME_NONE;
 }
 
 void
@@ -471,6 +476,11 @@ gst_aja_video_src_start (GstAjaVideoSrc *src)
   if (src->input->start_streams)
     src->input->start_streams (src->input->videosrc);
   g_mutex_unlock (&src->input->lock);
+
+  src->skipped_last = 0;
+  src->skipped_overall = 0;
+  src->skip_from_timestamp = GST_CLOCK_TIME_NONE;
+  src->skip_to_timestamp = GST_CLOCK_TIME_NONE;
 
   return TRUE;
 }
@@ -811,7 +821,7 @@ out:
 
 static void
 gst_aja_video_src_update_time_mapping (GstAjaVideoSrc * src,
-    GstClockTime capture_time, GstClockTime stream_time)
+    GstClockTime capture_time, GstClockTime stream_time, gboolean discont)
 {
   if (src->window_skip_count == 0) {
     GstClockTime num, den, b, xbase;
@@ -892,16 +902,16 @@ gst_aja_video_src_update_time_mapping (GstAjaVideoSrc * src,
 
     /* At most 5% frame duration change per update */
     max_diff =
-        gst_util_uint64_scale (GST_SECOND / 200, src->info.fps_d,
+        gst_util_uint64_scale (GST_SECOND / 20, src->info.fps_d,
         src->info.fps_n);
 
     GST_DEBUG_OBJECT (src,
-        "New time mapping causes difference of %" GST_TIME_FORMAT,
-        GST_TIME_ARGS (diff));
+        "New time mapping causes difference of %" GST_TIME_FORMAT "(discont: %d)",
+        GST_TIME_ARGS (diff), discont);
     GST_DEBUG_OBJECT (src, "Maximum allowed per frame %" GST_TIME_FORMAT,
         GST_TIME_ARGS (max_diff));
 
-    if (diff > max_diff) {
+    if (!discont && diff > max_diff && diff < 50 * GST_MSECOND) {
       /* adjust so that we move that much closer */
       if (new_calculated > expected) {
         src->current_time_mapping.b = expected + max_diff;
@@ -1023,7 +1033,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
     return;
   }
 
-  gst_aja_video_src_update_time_mapping (src, capture_pipeline, stream_time);
+  gst_aja_video_src_update_time_mapping (src, capture_pipeline, stream_time, videoBuff->droppedChanged);
 
   if (src->output_stream_time) {
     timestamp = stream_time;
@@ -1039,6 +1049,8 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
   if (!src->flushing) {
     AjaCaptureVideoFrame *f;
     SignalChange signal_change = NO_CHANGE;
+    guint skipped_frames = 0;
+    gboolean skipped_before = FALSE;
 
     while (g_queue_get_length (&src->current_frames) >= src->queue_size) {
       f = (AjaCaptureVideoFrame *) g_queue_pop_head (&src->current_frames);
@@ -1048,11 +1060,35 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
           || f->signal_change == RECOVERED_SIGNAL)
         signal_change = f->signal_change;
       if (f->video_buff) {
-        GST_WARNING_OBJECT (src, "Dropping old frame at %" GST_TIME_FORMAT,
-            GST_TIME_ARGS (f->capture_time));
+        if (skipped_frames == 0 && src->skipped_last == 0)
+          src->skip_from_timestamp = f->capture_time;
+        skipped_frames++;
+        src->skip_to_timestamp = f->capture_time;
       }
       aja_capture_video_frame_free (f);
     }
+
+    if (src->skipped_last == 0 && skipped_frames > 0) {
+      GST_WARNING_OBJECT (src, "Starting to drop frames");
+    }
+
+    if (skipped_frames == 0 && src->skipped_last > 0) {
+      GST_ELEMENT_WARNING_WITH_DETAILS (src,
+          STREAM, FAILED,
+          ("Dropped %u old frames from %" GST_TIME_FORMAT " to %"
+          GST_TIME_FORMAT, src->skipped_last,
+          GST_TIME_ARGS (src->skip_from_timestamp),
+          GST_TIME_ARGS (src->skip_to_timestamp)),
+          (NULL),
+          ("dropped", G_TYPE_UINT, src->skipped_last,
+           "from", G_TYPE_UINT64, src->skip_from_timestamp,
+           "to", G_TYPE_UINT64, src->skip_to_timestamp, NULL));
+      src->skipped_overall += src->skipped_last;
+      src->skipped_last = 0;
+      skipped_before = TRUE;
+    }
+
+    src->skipped_last += skipped_frames;
 
     // Write the GOT_SIGNAL change into the oldest frame again
     if (signal_change != NO_CHANGE) {
@@ -1068,6 +1104,9 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
     f->stream_time = stream_time;
     f->mode = src->modeEnum;
     f->signal_change = NO_CHANGE;
+
+    if (skipped_before)
+      videoBuff->droppedChanged = true;
 
     g_queue_push_tail (&src->current_frames, f);
     g_cond_signal (&src->cond);
@@ -1180,6 +1219,7 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
   guint32 timecode_high, timecode_low;
   guint8 aja_field_count;
   guint8 *ancillary_data;
+  gboolean discont = false;
 
   if (!gst_aja_video_src_start (src)) {
     return GST_FLOW_NOT_NEGOTIATED;
@@ -1285,6 +1325,24 @@ retry:
   timecode_high = f->video_buff->timeCodeHigh;
   timecode_low = f->video_buff->timeCodeLow;
   ancillary_data = (guint8 *) f->video_buff->pAncillaryData;
+  discont = f->video_buff->droppedChanged;
+
+  if (f->video_buff->droppedChanged) {
+    GstMessage *msg;
+    GstClockTime running_time;
+
+    running_time = gst_segment_to_running_time (&GST_BASE_SRC (src)->segment,
+        GST_FORMAT_TIME, capture_time);
+
+    msg = gst_message_new_qos (GST_OBJECT (src), TRUE, running_time, f->stream_time,
+        f->capture_time, gst_util_uint64_scale_int (GST_SECOND,
+      src->input->mode->fps_d, src->input->mode->fps_n));
+    gst_message_set_qos_stats (msg, GST_FORMAT_BUFFERS,
+                               f->video_buff->framesProcessed - src->skipped_overall,
+                               f->video_buff->framesDropped + src->skipped_overall);
+    gst_element_post_message (GST_ELEMENT (src), msg);
+  }
+
   aja_capture_video_frame_free (f);
   f = NULL;
 
@@ -1297,6 +1355,9 @@ retry:
     if (src->input->mode->isTff)
       GST_BUFFER_FLAG_SET (*buffer, GST_VIDEO_BUFFER_FLAG_TFF);
   }
+
+  if (discont)
+    GST_BUFFER_FLAG_SET (*buffer, GST_BUFFER_FLAG_DISCONT);
 
   if (timecode_valid) {
     uint8_t hours, minutes, seconds, frames;
