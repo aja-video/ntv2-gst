@@ -659,8 +659,6 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
   g_mutex_unlock (&src->input->lock);
 
   if (videosrc) {
-    g_mutex_lock (&videosrc->lock);
-
     // The videosrc is always first passed the frame
     g_assert (videosrc->first_time != GST_CLOCK_TIME_NONE);
 
@@ -674,7 +672,6 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
           "Skipping frame as requested: %" GST_TIME_FORMAT " < %"
           GST_TIME_FORMAT, GST_TIME_ARGS (stream_time),
           GST_TIME_ARGS (videosrc->skip_first_time + videosrc->first_time));
-      g_mutex_unlock (&videosrc->lock);
       src->had_signal = TRUE;
       src->input->ntv2AVHevc->ReleaseAudioBuffer (audioBuff);
       return;
@@ -687,7 +684,6 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
           videosrc->current_time_mapping.xbase,
           videosrc->current_time_mapping.b, videosrc->current_time_mapping.num,
           videosrc->current_time_mapping.den);
-    g_mutex_unlock (&videosrc->lock);
     gst_object_unref (videosrc);
     //GST_LOG_OBJECT (src, "Actual timestamp %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_time));
   } else {
@@ -696,6 +692,7 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
   }
 
   g_mutex_lock (&src->lock);
+  src->had_signal = TRUE;
   if (!src->flushing) {
     guint skipped_frames = 0;
     gboolean skipped_before = FALSE;
@@ -749,11 +746,11 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
 
     gst_queue_array_push_tail_struct (src->current_packets, &f);
     g_cond_signal (&src->cond);
+    g_mutex_unlock (&src->lock);
   } else {
+    g_mutex_unlock (&src->lock);
     src->input->ntv2AVHevc->ReleaseAudioBuffer (audioBuff);
   }
-  src->had_signal = TRUE;
-  g_mutex_unlock (&src->lock);
 }
 
 static GstFlowReturn
