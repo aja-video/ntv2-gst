@@ -45,7 +45,7 @@ struct _GstAjaAudioSrc
     GCond                       cond;
     GMutex                      lock;
     gboolean                    flushing;
-    GQueue                      current_packets;
+    GstQueueArray              *current_packets;
 
     GstClockTime                alignment_threshold;
     GstClockTime                discont_wait;
