@@ -79,13 +79,13 @@ typedef struct
 } AjaCaptureVideoFrame;
 
 static void
-aja_capture_video_frame_free (void *data)
+aja_capture_video_frame_clear (void *data)
 {
   AjaCaptureVideoFrame *frame = (AjaCaptureVideoFrame *) data;
 
   if ((frame->video_buff) && (frame->video_src->input) && (frame->video_src->input->ntv2AVHevc))
     frame->video_src->input->ntv2AVHevc->ReleaseVideoBuffer (frame->video_buff);
-  g_free (frame);
+  memset(frame, 0, sizeof (*frame));
 }
 
 static void gst_aja_video_src_set_property (GObject * object, guint property_id,
@@ -268,7 +268,7 @@ gst_aja_video_src_init (GstAjaVideoSrc * src)
   g_mutex_init (&src->lock);
   g_cond_init (&src->cond);
 
-  g_queue_init (&src->current_frames);
+  src->current_frames = gst_queue_array_new_for_struct (sizeof (AjaCaptureVideoFrame), DEFAULT_QUEUE_SIZE);
 
   src->skipped_last = 0;
   src->skipped_overall = 0;
@@ -436,11 +436,15 @@ void
 gst_aja_video_src_finalize (GObject * object)
 {
   GstAjaVideoSrc *src = GST_AJA_VIDEO_SRC (object);
+
   GST_DEBUG_OBJECT (src, "finalize");
 
-  g_queue_foreach (&src->current_frames, (GFunc) aja_capture_video_frame_free,
-      NULL);
-  g_queue_clear (&src->current_frames);
+  AjaCaptureVideoFrame *frame;
+  while ((frame = (AjaCaptureVideoFrame *) gst_queue_array_pop_head_struct (src->current_frames))) {
+    aja_capture_video_frame_clear (frame);
+  }
+  gst_queue_array_free (src->current_frames);
+  src->current_frames = NULL;
 
   g_free (src->device_identifier);
   src->device_identifier = NULL;
@@ -551,9 +555,11 @@ gst_aja_video_src_unlock_stop (GstBaseSrc * bsrc)
 
   g_mutex_lock (&src->lock);
   src->flushing = FALSE;
-  g_queue_foreach (&src->current_frames, (GFunc) aja_capture_video_frame_free,
-      NULL);
-  g_queue_clear (&src->current_frames);
+
+  AjaCaptureVideoFrame *frame;
+  while ((frame = (AjaCaptureVideoFrame *) gst_queue_array_pop_head_struct (src->current_frames))) {
+    aja_capture_video_frame_clear (frame);
+  }
   g_mutex_unlock (&src->lock);
 
   return TRUE;
@@ -697,9 +703,11 @@ gst_aja_video_src_stop (GstAjaVideoSrc * src)
     g_mutex_unlock (&src->input->lock);
   }
 
-  g_queue_foreach (&src->current_frames, (GFunc) aja_capture_video_frame_free,
-      NULL);
-  g_queue_clear (&src->current_frames);
+  AjaCaptureVideoFrame *frame;
+  while ((frame = (AjaCaptureVideoFrame *) gst_queue_array_pop_head_struct (src->current_frames))) {
+    aja_capture_video_frame_clear (frame);
+  }
+
   src->signal_state = SIGNAL_STATE_UNKNOWN;
 
   return TRUE;
@@ -978,12 +986,12 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
       // Signal to the streaming thread that we lost signal so it can handle
       // this after all remaining queued up frames are handled
       if (!src->flushing) {
-        AjaCaptureVideoFrame *f;
+        AjaCaptureVideoFrame f;
 
-        f = (AjaCaptureVideoFrame *) g_malloc0 (sizeof (AjaCaptureVideoFrame));
-        f->signal_change = LOST_SIGNAL;
+        memset(&f, 0, sizeof (f));
+        f.signal_change = LOST_SIGNAL;
 
-        g_queue_push_tail (&src->current_frames, f);
+        gst_queue_array_push_tail_struct (src->current_frames, &f);
         g_cond_signal (&src->cond);
       }
     }
@@ -998,12 +1006,12 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
       // Signal to the streaming thread that we got signal again so it can handle
       // this after all remaining queued up frames are handled
       if (!src->flushing) {
-        AjaCaptureVideoFrame *f;
+        AjaCaptureVideoFrame f;
 
-        f = (AjaCaptureVideoFrame *) g_malloc0 (sizeof (AjaCaptureVideoFrame));
-        f->signal_change = previous_signal_state == SIGNAL_STATE_LOST ? RECOVERED_SIGNAL : GOT_SIGNAL;
+        memset(&f, 0, sizeof (f));
+        f.signal_change = previous_signal_state == SIGNAL_STATE_LOST ? RECOVERED_SIGNAL : GOT_SIGNAL;
 
-        g_queue_push_tail (&src->current_frames, f);
+        gst_queue_array_push_tail_struct (src->current_frames, &f);
         g_cond_signal (&src->cond);
       }
     }
@@ -1047,13 +1055,12 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
   //GST_ERROR_OBJECT (src, "Actual timestamp %" GST_TIME_FORMAT, GST_TIME_ARGS (capture_time));
 
   if (!src->flushing) {
-    AjaCaptureVideoFrame *f;
     SignalChange signal_change = NO_CHANGE;
     guint skipped_frames = 0;
     gboolean skipped_before = FALSE;
 
-    while (g_queue_get_length (&src->current_frames) >= src->queue_size) {
-      f = (AjaCaptureVideoFrame *) g_queue_pop_head (&src->current_frames);
+    while (gst_queue_array_get_length (src->current_frames) >= src->queue_size) {
+      AjaCaptureVideoFrame *f = (AjaCaptureVideoFrame *) gst_queue_array_pop_head_struct (src->current_frames);
 
       // We need to remember if we got signal back here at some point
       if ((f->signal_change == GOT_SIGNAL && signal_change != RECOVERED_SIGNAL)
@@ -1065,7 +1072,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
         skipped_frames++;
         src->skip_to_timestamp = f->capture_time;
       }
-      aja_capture_video_frame_free (f);
+      aja_capture_video_frame_clear (f);
     }
 
     if (src->skipped_last == 0 && skipped_frames > 0) {
@@ -1092,23 +1099,24 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
 
     // Write the GOT_SIGNAL change into the oldest frame again
     if (signal_change != NO_CHANGE) {
-      f = (AjaCaptureVideoFrame *) g_queue_peek_head (&src->current_frames);
+      AjaCaptureVideoFrame *f = (AjaCaptureVideoFrame *) gst_queue_array_peek_head_struct (src->current_frames);
       if (f)
         f->signal_change = signal_change;
     }
 
-    f = (AjaCaptureVideoFrame *) g_malloc0 (sizeof (AjaCaptureVideoFrame));
-    f->video_src = src;
-    f->video_buff = videoBuff;
-    f->capture_time = timestamp;
-    f->stream_time = stream_time;
-    f->mode = src->modeEnum;
-    f->signal_change = NO_CHANGE;
+    AjaCaptureVideoFrame f;
+    memset(&f, 0, sizeof (f));
+    f.video_src = src;
+    f.video_buff = videoBuff;
+    f.capture_time = timestamp;
+    f.stream_time = stream_time;
+    f.mode = src->modeEnum;
+    f.signal_change = NO_CHANGE;
 
     if (skipped_before)
       videoBuff->droppedChanged = true;
 
-    g_queue_push_tail (&src->current_frames, f);
+    gst_queue_array_push_tail_struct (src->current_frames, &f);
     g_cond_signal (&src->cond);
   } else {
     src->input->ntv2AVHevc->ReleaseVideoBuffer (videoBuff);
@@ -1212,7 +1220,7 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
   GstFlowReturn flow_ret = GST_FLOW_OK;
 
-  AjaCaptureVideoFrame *f;
+  AjaCaptureVideoFrame f;
   GstCaps *caps;
   GstClockTime capture_time, stream_time;
   gboolean timecode_valid;
@@ -1227,51 +1235,54 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
   g_mutex_lock (&src->lock);
 retry:
-  while (g_queue_is_empty (&src->current_frames) && !src->flushing) {
+  while (gst_queue_array_is_empty (src->current_frames) && !src->flushing) {
     g_cond_wait (&src->cond, &src->lock);
   }
 
-  f = (AjaCaptureVideoFrame *) g_queue_pop_head (&src->current_frames);
-
   if (src->flushing) {
     g_mutex_unlock (&src->lock);
-    if (f)
-      aja_capture_video_frame_free (f);
     GST_DEBUG_OBJECT (src, "Flushing");
     return GST_FLOW_FLUSHING;
   }
 
+  f = *(AjaCaptureVideoFrame *) gst_queue_array_pop_head_struct (src->current_frames);
+
   // First of all, notify about signal change
-  if (f->signal_change == GOT_SIGNAL || f->signal_change == RECOVERED_SIGNAL) {
+  if (f.signal_change == GOT_SIGNAL || f.signal_change == RECOVERED_SIGNAL) {
     g_object_notify (G_OBJECT (src), "signal");
-    if (f->signal_change == RECOVERED_SIGNAL)
+    if (f.signal_change == RECOVERED_SIGNAL)
       GST_ELEMENT_INFO (GST_ELEMENT (src), RESOURCE, READ, ("Signal recovered"),
         ("Input source detected"));
-  } else if (f->signal_change == LOST_SIGNAL) {
+  } else if (f.signal_change == LOST_SIGNAL) {
     g_object_notify (G_OBJECT (src), "signal");
     GST_ELEMENT_WARNING (GST_ELEMENT (src), RESOURCE, READ, ("Signal lost"),
         ("No input source was detected - video frames invalid"));
   }
 
   // Retry if we got no video buffer
-  if (!f->video_buff) {
-    aja_capture_video_frame_free (f);
+  if (!f.video_buff) {
+    aja_capture_video_frame_clear (&f);
     goto retry;
   }
 
-  if (src->modeEnum != f->mode ||
-      src->transferCharacteristics != f->video_buff->transferCharacteristics ||
-      src->colorimetry != f->video_buff->colorimetry ||
-      src->fullRange != f->video_buff->fullRange ||
+  if (src->modeEnum != f.mode ||
+      src->transferCharacteristics != f.video_buff->transferCharacteristics ||
+      src->colorimetry != f.video_buff->colorimetry ||
+      src->fullRange != f.video_buff->fullRange ||
       !gst_pad_has_current_caps (GST_BASE_SRC_PAD (src))) {
-    if (src->modeEnum != f->mode)
-    GST_DEBUG_OBJECT (src, "Mode changed from %d to %d", src->modeEnum, f->mode);
-    src->modeEnum = f->mode;
-    src->transferCharacteristics = f->video_buff->transferCharacteristics;
-    src->colorimetry = f->video_buff->colorimetry;
-    src->fullRange = f->video_buff->fullRange;
+    GST_DEBUG_OBJECT (src, "Mode changed from %d to %d (transfer "
+        "characteristics: %d -> %d, colorimetry: %d -> %d, full "
+        "range: %d -> %d)", src->modeEnum, f.mode,
+        src->transferCharacteristics, f.video_buff->transferCharacteristics,
+        src->colorimetry, f.video_buff->colorimetry,
+        src->fullRange, f.video_buff->fullRange);
+
+    src->modeEnum = f.mode;
+    src->transferCharacteristics = f.video_buff->transferCharacteristics;
+    src->colorimetry = f.video_buff->colorimetry;
+    src->fullRange = f.video_buff->fullRange;
     g_mutex_unlock (&src->lock);
-    caps = gst_aja_mode_get_caps_raw (f->mode);
+    caps = gst_aja_mode_get_caps_raw (f.mode);
     gst_video_info_from_caps (&src->info, caps);
     // TODO: Work with videoinfo instead of caps
     gst_caps_unref (caps);
@@ -1317,34 +1328,33 @@ retry:
 
   //printf("data_size = %ld\n", data_size);
 
-  *buffer = gst_buffer_ref (f->video_buff->buffer);
-  capture_time = f->capture_time;
-  stream_time = f->stream_time;
-  timecode_valid = f->video_buff->timeCodeValid;
-  aja_field_count = f->video_buff->fieldCount;
-  timecode_high = f->video_buff->timeCodeHigh;
-  timecode_low = f->video_buff->timeCodeLow;
-  ancillary_data = (guint8 *) f->video_buff->pAncillaryData;
-  discont = f->video_buff->droppedChanged;
+  *buffer = gst_buffer_ref (f.video_buff->buffer);
+  capture_time = f.capture_time;
+  stream_time = f.stream_time;
+  timecode_valid = f.video_buff->timeCodeValid;
+  aja_field_count = f.video_buff->fieldCount;
+  timecode_high = f.video_buff->timeCodeHigh;
+  timecode_low = f.video_buff->timeCodeLow;
+  ancillary_data = (guint8 *) f.video_buff->pAncillaryData;
+  discont = f.video_buff->droppedChanged;
 
-  if (f->video_buff->droppedChanged) {
+  if (f.video_buff->droppedChanged) {
     GstMessage *msg;
     GstClockTime running_time;
 
     running_time = gst_segment_to_running_time (&GST_BASE_SRC (src)->segment,
         GST_FORMAT_TIME, capture_time);
 
-    msg = gst_message_new_qos (GST_OBJECT (src), TRUE, running_time, f->stream_time,
-        f->capture_time, gst_util_uint64_scale_int (GST_SECOND,
+    msg = gst_message_new_qos (GST_OBJECT (src), TRUE, running_time, f.stream_time,
+        f.capture_time, gst_util_uint64_scale_int (GST_SECOND,
       src->input->mode->fps_d, src->input->mode->fps_n));
     gst_message_set_qos_stats (msg, GST_FORMAT_BUFFERS,
-                               f->video_buff->framesProcessed - src->skipped_overall,
-                               f->video_buff->framesDropped + src->skipped_overall);
+                               f.video_buff->framesProcessed - src->skipped_overall,
+                               f.video_buff->framesDropped + src->skipped_overall);
     gst_element_post_message (GST_ELEMENT (src), msg);
   }
 
-  aja_capture_video_frame_free (f);
-  f = NULL;
+  aja_capture_video_frame_clear (&f);
 
   GST_BUFFER_TIMESTAMP (*buffer) = capture_time;
   GST_BUFFER_DURATION (*buffer) = gst_util_uint64_scale_int (GST_SECOND,

@@ -86,14 +86,14 @@ typedef struct
 } AjaCaptureAudioPacket;
 
 static void
-aja_capture_audio_packet_free (void *data)
+aja_capture_audio_packet_clear (void *data)
 {
   AjaCaptureAudioPacket *packet = (AjaCaptureAudioPacket *) data;
 
   if ((packet->audio_src->input) && (packet->audio_src->input->ntv2AVHevc))
     packet->audio_src->input->ntv2AVHevc->
         ReleaseAudioBuffer (packet->audio_buff);
-  g_free (packet);
+  memset(packet, 0, sizeof (*packet));
 }
 
 static void gst_aja_audio_src_set_property (GObject * object, guint property_id,
@@ -233,7 +233,7 @@ gst_aja_audio_src_init (GstAjaAudioSrc * src)
   g_mutex_init (&src->lock);
   g_cond_init (&src->cond);
 
-  g_queue_init (&src->current_packets);
+  src->current_packets = gst_queue_array_new_for_struct (sizeof (AjaCaptureAudioPacket), DEFAULT_QUEUE_SIZE);
 
   src->skipped_last = 0;
   src->skipped_overall = 0;
@@ -331,9 +331,12 @@ gst_aja_audio_src_finalize (GObject * object)
   GstAjaAudioSrc *src = GST_AJA_AUDIO_SRC (object);
   GST_DEBUG_OBJECT (src, "finalize");
 
-  g_queue_foreach (&src->current_packets, (GFunc) aja_capture_audio_packet_free,
-      NULL);
-  g_queue_clear (&src->current_packets);
+  AjaCaptureAudioPacket *packet;
+  while ((packet = (AjaCaptureAudioPacket *) gst_queue_array_pop_head_struct (src->current_packets))) {
+    aja_capture_audio_packet_clear (packet);
+  }
+  gst_queue_array_free (src->current_packets);
+  src->current_packets = NULL;
 
   g_free (src->device_identifier);
   src->device_identifier = NULL;
@@ -447,9 +450,11 @@ gst_aja_audio_src_unlock_stop (GstBaseSrc * bsrc)
 
   g_mutex_lock (&src->lock);
   src->flushing = FALSE;
-  g_queue_foreach (&src->current_packets, (GFunc) aja_capture_audio_packet_free,
-      NULL);
-  g_queue_clear (&src->current_packets);
+
+  AjaCaptureAudioPacket *packet;
+  while ((packet = (AjaCaptureAudioPacket *) gst_queue_array_pop_head_struct (src->current_packets))) {
+    aja_capture_audio_packet_clear (packet);
+  }
   g_mutex_unlock (&src->lock);
 
   return TRUE;
@@ -543,9 +548,10 @@ gst_aja_audio_src_stop (GstAjaAudioSrc * src)
     g_mutex_unlock (&src->input->lock);
   }
 
-  g_queue_foreach (&src->current_packets, (GFunc) aja_capture_audio_packet_free,
-      NULL);
-  g_queue_clear (&src->current_packets);
+  AjaCaptureAudioPacket *packet;
+  while ((packet = (AjaCaptureAudioPacket *) gst_queue_array_pop_head_struct (src->current_packets))) {
+    aja_capture_audio_packet_clear (packet);
+  }
   src->had_signal = FALSE;
 
   return TRUE;
@@ -691,12 +697,11 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
 
   g_mutex_lock (&src->lock);
   if (!src->flushing) {
-    AjaCaptureAudioPacket *f;
     guint skipped_frames = 0;
     gboolean skipped_before = FALSE;
 
-    while (g_queue_get_length (&src->current_packets) >= src->queue_size) {
-      f = (AjaCaptureAudioPacket *) g_queue_pop_head (&src->current_packets);
+    while (gst_queue_array_get_length (src->current_packets) >= src->queue_size) {
+      AjaCaptureAudioPacket *f = (AjaCaptureAudioPacket *) gst_queue_array_pop_head_struct (src->current_packets);
       GST_WARNING_OBJECT (src, "Dropping old packet at %" GST_TIME_FORMAT,
           GST_TIME_ARGS (f->capture_time));
 
@@ -707,7 +712,7 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
         src->skip_to_timestamp = f->capture_time;
       }
 
-      aja_capture_audio_packet_free (f);
+      aja_capture_audio_packet_clear (f);
     }
 
     if (src->skipped_last == 0 && skipped_frames > 0) {
@@ -732,16 +737,17 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
 
     src->skipped_last += skipped_frames;
 
-    f = (AjaCaptureAudioPacket *) g_malloc0 (sizeof (AjaCaptureAudioPacket));
-    f->audio_src = src;
-    f->audio_buff = audioBuff;
-    f->capture_time = timestamp;
-    f->stream_time = stream_time;
-    f->first_buffer = !src->had_signal;
+    AjaCaptureAudioPacket f;
+    memset(&f, 0, sizeof (f));
+    f.audio_src = src;
+    f.audio_buff = audioBuff;
+    f.capture_time = timestamp;
+    f.stream_time = stream_time;
+    f.first_buffer = !src->had_signal;
     if (skipped_before)
       audioBuff->droppedChanged = TRUE;
 
-    g_queue_push_tail (&src->current_packets, f);
+    gst_queue_array_push_tail_struct (src->current_packets, &f);
     g_cond_signal (&src->cond);
   } else {
     src->input->ntv2AVHevc->ReleaseAudioBuffer (audioBuff);
@@ -760,7 +766,7 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
   glong sample_count = 0;
   gsize data_size;
-  AjaCaptureAudioPacket *p;
+  AjaCaptureAudioPacket p;
 
   GstClockTime timestamp, stream_time, duration;
   GstClockTime start_time, end_time;
@@ -774,47 +780,45 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
   }
 
   g_mutex_lock (&src->lock);
-  while (g_queue_is_empty (&src->current_packets) && !src->flushing) {
+  while (gst_queue_array_is_empty (src->current_packets) && !src->flushing) {
     g_cond_wait (&src->cond, &src->lock);
   }
 
-  p = (AjaCaptureAudioPacket *) g_queue_pop_head (&src->current_packets);
-  g_mutex_unlock (&src->lock);
-
   if (src->flushing) {
-    if (p)
-      aja_capture_audio_packet_free (p);
+    g_mutex_unlock (&src->lock);
     GST_DEBUG_OBJECT (src, "Flushing");
     return GST_FLOW_FLUSHING;
   }
 
-  data_size = (gsize) p->audio_buff->audioDataSize;
+  p = *(AjaCaptureAudioPacket *) gst_queue_array_pop_head_struct (src->current_packets);
+  g_mutex_unlock (&src->lock);
+
+  data_size = (gsize) p.audio_buff->audioDataSize;
   sample_count = data_size / src->info.bpf;
 
-  *buffer = gst_buffer_ref (p->audio_buff->buffer);
+  *buffer = gst_buffer_ref (p.audio_buff->buffer);
 
-  timestamp = p->capture_time;
-  stream_time = p->stream_time;
-  discont = p->first_buffer || p->audio_buff->droppedChanged;
+  timestamp = p.capture_time;
+  stream_time = p.stream_time;
+  discont = p.first_buffer || p.audio_buff->droppedChanged;
 
-  if (p->audio_buff->droppedChanged) {
+  if (p.audio_buff->droppedChanged) {
     GstMessage *msg;
     GstClockTime running_time;
 
     running_time = gst_segment_to_running_time (&GST_BASE_SRC (src)->segment,
-        GST_FORMAT_TIME, p->capture_time);
+        GST_FORMAT_TIME, p.capture_time);
 
-    msg = gst_message_new_qos (GST_OBJECT (src), TRUE, running_time, p->stream_time,
-        p->capture_time, gst_util_uint64_scale_int (GST_SECOND,
+    msg = gst_message_new_qos (GST_OBJECT (src), TRUE, running_time, p.stream_time,
+        p.capture_time, gst_util_uint64_scale_int (GST_SECOND,
       src->input->mode->fps_d, src->input->mode->fps_n));
     gst_message_set_qos_stats (msg, GST_FORMAT_BUFFERS,
-                               p->audio_buff->framesProcessed - src->skipped_overall,
-                               p->audio_buff->framesDropped + src->skipped_overall);
+                               p.audio_buff->framesProcessed - src->skipped_overall,
+                               p.audio_buff->framesDropped + src->skipped_overall);
     gst_element_post_message (GST_ELEMENT (src), msg);
   }
 
-  aja_capture_audio_packet_free (p);
-  p = NULL;
+  aja_capture_audio_packet_clear (&p);
 
   // Jitter and discontinuity handling, based on audiobasesrc
   start_time = timestamp;

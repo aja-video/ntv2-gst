@@ -61,7 +61,7 @@ struct _GstAjaVideoSrc
     GCond                       cond;
     GMutex                      lock;
     gboolean                    flushing;
-    GQueue                      current_frames;
+    GstQueueArray               *current_frames;
 
     guint                       queue_size;
     gchar *                     device_identifier;
