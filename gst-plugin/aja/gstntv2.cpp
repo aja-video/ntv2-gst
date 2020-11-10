@@ -9,6 +9,9 @@
 #include <semaphore.h>
 #include <fcntl.h>
 #include <string>
+#include <sched.h>
+#include <unistd.h>
+#include <pthread.h>
 
 #include "gstntv2.h"
 #include "gstaja.h"
@@ -174,7 +177,8 @@ AJAStatus
     const SDIInputMode inSDIInputMode,
     const NTV2TCIndex inTimeCode,
     const bool inCaptureTall,
-    const bool inPassthrough)
+    const bool inPassthrough,
+    const uint32_t inCaptureCPUCore)
 {
   AJAStatus status (AJA_STATUS_SUCCESS);
 
@@ -188,6 +192,7 @@ AJAStatus
   mCaptureTall = inCaptureTall;
   mPassthrough = inPassthrough;
   mSDIInputMode = inSDIInputMode;
+  mCaptureCPUCore = inCaptureCPUCore;
 
   // Map input video modes. For quad-link and UHD/4k HDMI we need to map
   // to 4x modes, otherwise keep mode as is
@@ -1191,6 +1196,19 @@ NTV2GstAV::ACInputThreadStatic (AJAThread * pThread, void *pContext)
   (void) pThread;
 
   NTV2GstAV *pApp (reinterpret_cast < NTV2GstAV * >(pContext));
+
+  if (pApp->mCaptureCPUCore != (uint32_t) -1) {
+    cpu_set_t mask;
+    pthread_t current_thread = pthread_self();
+
+    CPU_ZERO(&mask);
+    CPU_SET(pApp->mCaptureCPUCore, &mask);
+
+    if (pthread_setaffinity_np(current_thread, sizeof (mask), &mask) != 0) {
+      GST_ERROR ("Failed to set affinity for current thread to core %u", pApp->mCaptureCPUCore);
+    }
+  }
+
   pApp->ACInputWorker ();
 }
 

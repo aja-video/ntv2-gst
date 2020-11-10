@@ -147,7 +147,8 @@ class NTV2GstAV
                                 const SDIInputMode              inSDIInputMode  = SDI_INPUT_MODE_SINGLE_LINK,
                                 const NTV2TCIndex               inTimeCode      = NTV2_TCINDEX_SDI1,
 				const bool                      inCaptureTall   = false,
-                                const bool                      inPassthrough   = false);
+                                const bool                      inPassthrough   = false,
+                                const uint32_t                  inCaptureCPUCore = -1);
 
         virtual AJAStatus InitAudio (const NTV2AudioSource inAudioSource, uint32_t *numAudioChannels);
 
@@ -283,6 +284,7 @@ class NTV2GstAV
         bool                        mMultiStream;            /// Demonstrates how to configure the board for multi-stream
         NTV2TCIndex                 mTimecodeMode;        /// Add timecode burn
 	bool                        mCaptureTall;	    /// Capture Tall Video
+        uint32_t                    mCaptureCPUCore;
         NTV2InputSource             mVideoSource;
         bool                        mPassthrough;
         NTV2AudioSystem             mAudioSystem;            ///    The audio system I'm using

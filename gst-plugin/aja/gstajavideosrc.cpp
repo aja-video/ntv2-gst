@@ -43,6 +43,7 @@ GST_DEBUG_CATEGORY_STATIC (gst_aja_video_src_debug);
 #define DEFAULT_SKIP_FIRST_TIME    (0)
 #define DEFAULT_TIMECODE_MODE	   (GST_AJA_TIMECODE_MODE_VITC1)
 #define DEFAULT_OUTPUT_CC	   (FALSE)
+#define DEFAULT_CAPTURE_CPU_CORE   ((guint)-1)
 
 enum
 {
@@ -58,7 +59,8 @@ enum
   PROP_SKIP_FIRST_TIME,
   PROP_TIMECODE_MODE,
   PROP_OUTPUT_CC,
-  PROP_SIGNAL
+  PROP_SIGNAL,
+  PROP_CAPTURE_CPU_CORE,
 };
 
 typedef enum {
@@ -223,6 +225,14 @@ gst_aja_video_src_class_init (GstAjaVideoSrcClass * klass)
           "True if there is a valid input signal available",
           FALSE, (GParamFlags) (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
 
+  g_object_class_install_property (gobject_class, PROP_CAPTURE_CPU_CORE,
+      g_param_spec_uint ("capture-cpu-core",
+          "Capture CPU Core",
+          "Sets the affinity of the capture thread to this CPU core (-1=disabled)",
+          0, G_MAXUINT, DEFAULT_CAPTURE_CPU_CORE,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+              G_PARAM_CONSTRUCT)));
+
   templ_caps = gst_aja_mode_get_template_caps_raw ();
   gst_element_class_add_pad_template (element_class,
       gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS, templ_caps));
@@ -250,6 +260,7 @@ gst_aja_video_src_init (GstAjaVideoSrc * src)
   src->output_stream_time = DEFAULT_OUTPUT_STREAM_TIME;
   src->skip_first_time = DEFAULT_SKIP_FIRST_TIME;
   src->timecode_mode = DEFAULT_TIMECODE_MODE;
+  src->capture_cpu_core = DEFAULT_CAPTURE_CPU_CORE;
 
   src->window_size = 64;
   src->times = g_new (GstClockTime, 4 * src->window_size);
@@ -364,6 +375,10 @@ gst_aja_video_src_set_property (GObject * object, guint property_id,
 #endif
       break;
 
+    case PROP_CAPTURE_CPU_CORE:
+      src->capture_cpu_core = g_value_get_uint (value);
+      break;
+
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -424,6 +439,10 @@ gst_aja_video_src_get_property (GObject * object, guint property_id,
 
     case PROP_SIGNAL:
       g_value_set_boolean (value, src->signal_state == SIGNAL_STATE_AVAILABLE);
+      break;
+
+    case PROP_CAPTURE_CPU_CORE:
+      g_value_set_uint (value, src->capture_cpu_core);
       break;
 
     default:
@@ -647,7 +666,7 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
       src->input->mode->is422,
       false,
       src->sdi_input_mode, timecode_mode, false, src->output_cc ? true : false,
-      src->passthrough ? true : false);
+      src->passthrough ? true : false, src->capture_cpu_core);
   if (!AJA_SUCCESS (status)) {
     GST_ERROR_OBJECT (src, "Failed to initialize input");
     g_mutex_unlock (&src->input->lock);
