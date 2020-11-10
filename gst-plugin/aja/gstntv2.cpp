@@ -1,6 +1,6 @@
 /**
-    @file        ntv2encodehevc.cpp
-    @brief        Implementation of NTV2EncodeHEVC class.
+    @file        ntv2encode.cpp
+    @brief        Implementation of NTV2Encode class.
     @copyright    Copyright (C) 2015 AJA Video Systems, Inc.  All rights reserved.
                   Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
 **/
@@ -43,14 +43,10 @@ NTV2GstAV::NTV2GstAV (const std::string inDeviceSpecifier,
 
 
 mACInputThread (NULL),
-mCodecRawThread (NULL),
-mCodecHevcThread (NULL),
-mM31 (NULL),
 mLock (new AJALock),
 mDeviceID (DEVICE_ID_NOTFOUND),
 mDeviceSpecifier (inDeviceSpecifier),
 mInputChannel (inChannel),
-mEncodeChannel (M31_CH0),
 mInputSource (NTV2_INPUTSOURCE_SDI1),
 mVideoFormat (NTV2_MAX_NUM_VIDEO_FORMATS),
 mMultiStream (false),
@@ -59,8 +55,6 @@ mNumAudioChannels (0),
 mLastFrame (false),
 mLastFrameInput (false),
 mLastFrameVideoOut (false),
-mLastFrameHevc (false),
-mLastFrameHevcOut (false),
 mLastFrameAudioOut (false),
 mGlobalQuit (false),
 mStarted (false),
@@ -71,8 +65,6 @@ mAudioCallbackRefcon (0),
 mAudioBufferPool (NULL),
 mVideoBufferPool (NULL)
 {
-  ::memset (mHevcInputBuffer, 0x0, sizeof (mHevcInputBuffer));
-
   _init_ntv2_debug ();
 }                               //    constructor
 
@@ -82,10 +74,6 @@ NTV2GstAV::~NTV2GstAV ()
   //    Stop my capture and consumer threads, then destroy them...
   Quit ();
 
-  if (mM31 != NULL) {
-    delete mM31;
-    mM31 = NULL;
-  }
   // unsubscribe from input vertical event...
   mDevice.UnsubscribeInputVerticalEvent (mInputChannel);
 
@@ -178,16 +166,13 @@ class ShmMutexLocker {
 };
 
 AJAStatus
-    NTV2GstAV::Init (const M31VideoPreset inPreset,
-    const NTV2VideoFormat inVideoFormat,
+    NTV2GstAV::Init (const NTV2VideoFormat inVideoFormat,
     const NTV2InputSource inInputSource,
     const uint32_t inBitDepth,
     const bool inIs422,
     const bool inIsAuto,
-    const bool inHevcOutput,
     const SDIInputMode inSDIInputMode,
     const NTV2TCIndex inTimeCode,
-    const bool inInfoData,
     const bool inCaptureTall,
     const bool inPassthrough)
 {
@@ -195,14 +180,11 @@ AJAStatus
 
   ShmMutexLocker locker;
 
-  mPreset = inPreset;
   mVideoSource = inInputSource;
   mBitDepth = inBitDepth;
   mIs422 = inIs422;
   mIsAuto = inIsAuto;
-  mHevcOutput = inHevcOutput;
   mTimecodeMode = inTimeCode;
-  mWithInfo = inInfoData;
   mCaptureTall = inCaptureTall;
   mPassthrough = inPassthrough;
   mSDIInputMode = inSDIInputMode;
@@ -308,7 +290,7 @@ AJAStatus
   //  If we are in auto mode then do nothing if we are already running, otherwise force raw, 422, 8 bit.
   //  This flag shoud only be driven by the audiosrc to either start a non running channel without having
   //  to know anything about the video or to latch onto an alreay running channel in the event it has been
-  //  started by the videosrc or hevcsrc.
+  //  started by the videosrc.
   if (mIsAuto) {
     if (mStarted)
       return AJA_STATUS_SUCCESS;
@@ -321,7 +303,6 @@ AJAStatus
       return status;
 
     mBitDepth = 8;
-    mHevcOutput = false;
   }
 
   // Ensure that mCaptureTall is only set for formats that can
@@ -359,15 +340,6 @@ AJAStatus
   if (AJA_FAILURE (status)) {
     GST_ERROR ("Video setup failure");
     return status;
-  }
-
-  //    Setup codec
-  if (mHevcOutput) {
-    status = SetupHEVC ();
-    if (AJA_FAILURE (status)) {
-      GST_ERROR ("Encoder setup failure");
-      return status;
-    }
   }
 
   return AJA_STATUS_SUCCESS;
@@ -408,46 +380,20 @@ NTV2GstAV::Quit (void)
     int i;
     int timeout = 300;
     for (i = 0; i < timeout; i++) {
-      if (mHevcOutput) {
-        if (mLastFrameHevcOut && mLastFrameAudioOut)
-          break;
-      } else {
-        if (mLastFrameVideoOut && mLastFrameAudioOut)
-          break;
-      }
+      if (mLastFrameVideoOut && mLastFrameAudioOut)
+        break;
       AJATime::Sleep (10);
     }
 
     if (i == timeout)
       GST_ERROR ("ERROR: Wait for last frame timeout");
-
-    if (mM31 && mHevcOutput) {
-      //    Stop the encoder stream
-      if (!mM31->ChangeEHState (Hevc_EhState_ReadyToStop, mEncodeChannel))
-        GST_ERROR ("ERROR: ChangeEHState ready to stop failed");
-
-      if (!mM31->ChangeEHState (Hevc_EhState_Stop, mEncodeChannel))
-        GST_ERROR ("ERROR: ChangeEHState stop failed");
-
-      // stop the video input stream
-      if (!mM31->ChangeVInState (Hevc_VinState_Stop, mEncodeChannel))
-        GST_ERROR ("ERROR: ChangeVInState stop failed");
-
-      if (!mMultiStream) {
-        //    Now go to the init state
-        if (!mM31->ChangeMainState (Hevc_MainState_Init,
-                Hevc_EncodeMode_Single))
-          GST_ERROR ("ERROR: ChangeMainState to init failed");
-      }
-    }
   }
+
   //    Stop the worker threads
   mGlobalQuit = true;
   mStarted = false;
 
   StopACThread ();
-  StopCodecRawThread ();
-  StopCodecHevcThread ();
   FreeHostBuffers ();
 
   //  Stop video capture
@@ -459,247 +405,13 @@ NTV2GstAV::Quit (void)
   }
 }
 
-
-AJAStatus NTV2GstAV::SetupHEVC (void)
-{
-  HevcMainState
-      mainState;
-  HevcEncodeMode
-      encodeMode;
-  HevcVinState
-      vInState;
-  HevcEhState
-      ehState;
-
-  // Allocate our M31 helper class
-  mM31 = new CNTV2m31 (&mDevice);
-
-  if (mMultiStream) {
-    mM31->GetMainState (&mainState, &encodeMode);
-    if ((mainState != Hevc_MainState_Encode)
-        || (encodeMode != Hevc_EncodeMode_Multiple)) {
-      // Here we need to start up the M31 so we reset the part then go into the init state
-      if (!mM31->Reset ()) {
-        GST_ERROR ("ERROR: Reset of M31 failed");
-        return AJA_STATUS_INITIALIZE;
-      }
-      // After a reset we should be in the boot state so lets check this
-      mM31->GetMainState (&mainState);
-      if (mainState != Hevc_MainState_Boot) {
-        GST_ERROR ("ERROR: Not in boot state after reset");
-        return AJA_STATUS_INITIALIZE;
-      }
-      // Now go to the init state
-      if (!mM31->ChangeMainState (Hevc_MainState_Init,
-              Hevc_EncodeMode_Multiple)) {
-        GST_ERROR ("ERROR: ChangeMainState to init failed");
-        return AJA_STATUS_INITIALIZE;
-      }
-
-      mM31->GetMainState (&mainState);
-      if (mainState != Hevc_MainState_Init) {
-        GST_ERROR ("ERROR: Not in init state after change");
-        return AJA_STATUS_INITIALIZE;
-      }
-      // Now lets configure the device for a given preset.  First we must clear out all of the params which
-      // is necessary since the param space is basically uninitialized memory.
-      mM31->ClearAllParams ();
-
-      // Load and set common params for all channels
-      if (!mM31->SetupCommonParams (mPreset, M31_CH0)) {
-        GST_ERROR ("ERROR: SetCommonParams failed ch0");
-        return AJA_STATUS_INITIALIZE;
-      }
-      // Change state to encode
-      if (!mM31->ChangeMainState (Hevc_MainState_Encode,
-              Hevc_EncodeMode_Multiple)) {
-        GST_ERROR ("ERROR: ChangeMainState to encode failed");
-        return AJA_STATUS_INITIALIZE;
-      }
-
-      mM31->GetMainState (&mainState);
-      if (mainState != Hevc_MainState_Encode) {
-        GST_ERROR ("ERROR: Not in encode state after change");
-        return AJA_STATUS_INITIALIZE;
-      }
-    }
-    // Write out stream params
-    if (!mM31->SetupVIParams (mPreset, mEncodeChannel)) {
-      GST_ERROR ("ERROR: SetupVIParams failed");
-      return AJA_STATUS_INITIALIZE;
-    }
-    if (!mM31->SetupVInParams (mPreset, mEncodeChannel)) {
-      GST_ERROR ("ERROR: SetupVinParams failed");
-      return AJA_STATUS_INITIALIZE;
-    }
-    if (!mM31->SetupVAParams (mPreset, mEncodeChannel)) {
-      GST_ERROR ("ERROR: SetupVAParams failed");
-      return AJA_STATUS_INITIALIZE;
-    }
-    if (!mM31->SetupEHParams (mPreset, mEncodeChannel)) {
-      GST_ERROR ("ERROR: SetupEHParams failed");
-      return AJA_STATUS_INITIALIZE;
-    }
-
-    if (mWithInfo) {
-      // Enable picture information
-      if (!mM31->mpM31VInParam->SetPTSMode (M31_PTSModeHost,
-              (M31VirtualChannel) mEncodeChannel)) {
-        GST_ERROR ("ERROR: SetPTSMode failed");
-        return AJA_STATUS_INITIALIZE;
-      }
-    }
-    // Now that we have setup the M31 lets change the VIn and EH states for channel 0 to start
-    if (!mM31->ChangeVInState (Hevc_VinState_Start, mEncodeChannel)) {
-      GST_ERROR ("ERROR: ChangeVInState failed");
-      return AJA_STATUS_INITIALIZE;
-    }
-
-    mM31->GetVInState (&vInState, mEncodeChannel);
-    if (vInState != Hevc_VinState_Start) {
-      GST_ERROR ("ERROR: VIn didn't start = %d", vInState);
-      return AJA_STATUS_INITIALIZE;
-    }
-
-    if (!mM31->ChangeEHState (Hevc_EhState_Start, mEncodeChannel)) {
-      GST_ERROR ("ERROR: ChangeEHState failed");
-      return AJA_STATUS_INITIALIZE;
-    }
-
-    mM31->GetEHState (&ehState, mEncodeChannel);
-    if (ehState != Hevc_EhState_Start) {
-      GST_ERROR ("ERROR: EH didn't start = %d", ehState);
-      return AJA_STATUS_INITIALIZE;
-    }
-  } else {
-    // if we are in the init state assume that last stop was good
-    // otherwise reset the codec
-    mM31->GetMainState (&mainState, &encodeMode);
-    if ((mainState != Hevc_MainState_Init)
-        || (encodeMode != Hevc_EncodeMode_Single)) {
-      // Here we need to start up the M31 so we reset the part then go into the init state
-      if (!mM31->Reset ()) {
-        GST_ERROR ("ERROR: Reset of M31 failed");
-        return AJA_STATUS_INITIALIZE;
-      }
-      // After a reset we should be in the boot state so lets check this
-      mM31->GetMainState (&mainState);
-      if (mainState != Hevc_MainState_Boot) {
-        GST_ERROR ("ERROR: Not in boot state after reset");
-        return AJA_STATUS_INITIALIZE;
-      }
-      // Now go to the init state
-      if (!mM31->ChangeMainState (Hevc_MainState_Init, Hevc_EncodeMode_Single)) {
-        GST_ERROR ("ERROR: ChangeMainState to init failed");
-        return AJA_STATUS_INITIALIZE;
-      }
-
-      mM31->GetMainState (&mainState);
-      if (mainState != Hevc_MainState_Init) {
-        GST_ERROR ("ERROR: Not in init state after change");
-        return AJA_STATUS_INITIALIZE;
-      }
-    }
-    // Now lets configure the device for a given preset.  First we must clear out all of the params which
-    // is necessary since the param space is basically uninitialized memory.
-    mM31->ClearAllParams ();
-
-    // Now load params for M31 preset into local structures in CNTV2m31
-    if (!mM31->LoadAllParams (mPreset)) {
-      GST_ERROR ("ERROR: LoadAllPresets failed");
-      return AJA_STATUS_INITIALIZE;
-    }
-    // Here is where you can alter params sent to the M31 because all of these structures are public
-
-    // Write out all of the params to each of the 4 physical channels
-    if (!mM31->SetAllParams (M31_CH0)) {
-      GST_ERROR ("ERROR: SetVideoPreset failed ch0");
-      return AJA_STATUS_INITIALIZE;
-    }
-
-    if (!mM31->SetAllParams (M31_CH1)) {
-      GST_ERROR ("ERROR: SetVideoPreset failed ch1");
-      return AJA_STATUS_INITIALIZE;
-    }
-
-    if (!mM31->SetAllParams (M31_CH2)) {
-      GST_ERROR ("ERROR: SetVideoPreset failed ch2");
-      return AJA_STATUS_INITIALIZE;
-    }
-
-    if (!mM31->SetAllParams (M31_CH3)) {
-      GST_ERROR ("ERROR: SetVideoPreset failed ch3");
-      return AJA_STATUS_INITIALIZE;
-    }
-
-    if (mWithInfo) {
-      // Enable picture information
-      if (!mM31->mpM31VInParam->SetPTSMode (M31_PTSModeHost,
-              (M31VirtualChannel) M31_CH0)) {
-        GST_ERROR ("ERROR: SetPTSMode failed");
-        return AJA_STATUS_INITIALIZE;
-      }
-    }
-    // Change state to encode
-    if (!mM31->ChangeMainState (Hevc_MainState_Encode, Hevc_EncodeMode_Single)) {
-      GST_ERROR ("ERROR: ChangeMainState to encode failed");
-      return AJA_STATUS_INITIALIZE;
-    }
-
-    mM31->GetMainState (&mainState);
-    if (mainState != Hevc_MainState_Encode) {
-      GST_ERROR ("ERROR: Not in encode state after change");
-      return AJA_STATUS_INITIALIZE;
-    }
-    // Now that we have setup the M31 lets change the VIn and EH states for channel 0 to start
-    if (!mM31->ChangeVInState (Hevc_VinState_Start, 0x01)) {
-      GST_ERROR ("ERROR: ChangeVInState failed");
-      return AJA_STATUS_INITIALIZE;
-    }
-
-    mM31->GetVInState (&vInState, M31_CH0);
-    if (vInState != Hevc_VinState_Start) {
-      GST_ERROR ("ERROR: VIn didn't start = %d", vInState);
-      return AJA_STATUS_INITIALIZE;
-    }
-
-    if (!mM31->ChangeEHState (Hevc_EhState_Start, 0x01)) {
-      GST_ERROR ("ERROR: ChangeEHState failed");
-      return AJA_STATUS_INITIALIZE;
-    }
-
-    mM31->GetEHState (&ehState, M31_CH0);
-    if (ehState != Hevc_EhState_Start) {
-      GST_ERROR ("ERROR: EH didn't start = %d", ehState);
-      return AJA_STATUS_INITIALIZE;
-    }
-  }
-
-  return AJA_STATUS_SUCCESS;
-}
-
-
 AJAStatus NTV2GstAV::SetupVideo (void)
 {
   // Figure out frame buffer format
-  if (mHevcOutput) {
-    if (mBitDepth == 8) {
-      if (mIs422)
-        mPixelFormat = NTV2_FBF_8BIT_YCBCR_422PL2;
-      else
-        mPixelFormat = NTV2_FBF_8BIT_YCBCR_420PL2;
-    } else {
-      if (mIs422)
-        mPixelFormat = NTV2_FBF_10BIT_YCBCR_422PL2;
-      else
-        mPixelFormat = NTV2_FBF_10BIT_YCBCR_420PL2;
-    }
-  } else {
-    if (mBitDepth == 8)
-      mPixelFormat = NTV2_FBF_8BIT_YCBCR;
-    else
-      mPixelFormat = NTV2_FBF_10BIT_YCBCR;
-  }
+  if (mBitDepth == 8)
+    mPixelFormat = NTV2_FBF_8BIT_YCBCR;
+  else
+    mPixelFormat = NTV2_FBF_10BIT_YCBCR;
 
   // Enable and subscribe to the interrupts for the channel to be used...
   mDevice.EnableOutputInterrupt ();
@@ -853,35 +565,27 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   switch (mInputChannel) {
     default:
     case NTV2_CHANNEL1:
-      mEncodeChannel = M31_CH0;
       fbfInputSelect = NTV2_XptFrameBuffer1Input;
       break;
     case NTV2_CHANNEL2:
-      mEncodeChannel = M31_CH1;
       fbfInputSelect = NTV2_XptFrameBuffer2Input;
       break;
     case NTV2_CHANNEL3:
-      mEncodeChannel = M31_CH2;
       fbfInputSelect = NTV2_XptFrameBuffer3Input;
       break;
     case NTV2_CHANNEL4:
-      mEncodeChannel = M31_CH3;
       fbfInputSelect = NTV2_XptFrameBuffer4Input;
       break;
     case NTV2_CHANNEL5:
-      mEncodeChannel = M31_CH3; //FIXME
       fbfInputSelect = NTV2_XptFrameBuffer5Input;
       break;
     case NTV2_CHANNEL6:
-      mEncodeChannel = M31_CH3; //FIXME
       fbfInputSelect = NTV2_XptFrameBuffer6Input;
       break;
     case NTV2_CHANNEL7:
-      mEncodeChannel = M31_CH3; //FIXME
       fbfInputSelect = NTV2_XptFrameBuffer7Input;
       break;
     case NTV2_CHANNEL8:
-      mEncodeChannel = M31_CH3; //FIXME
       fbfInputSelect = NTV2_XptFrameBuffer8Input;
       break;
   }
@@ -1074,7 +778,6 @@ AJAStatus NTV2GstAV::SetupVideo (void)
         router.AddConnection(NTV2_XptFrameBuffer6DS2Input, NTV2_XptSDIIn8);
       }
       mOutputChannel = NTV2_CHANNEL5;
-      mEncodeChannel = M31_CH0;
     } else if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI && NTV2_IS_QUAD_QUAD_FORMAT(mVideoFormat)) {
       if (mInputChannel == NTV2_CHANNEL1) {
         router.AddConnection(NTV2_XptFrameBuffer1DS2Input, NTV2_XptSDIIn1DS2);
@@ -1086,7 +789,6 @@ AJAStatus NTV2GstAV::SetupVideo (void)
         router.AddConnection(NTV2_XptFrameBuffer6DS2Input, NTV2_XptSDIIn6DS2);
       }
       mOutputChannel = NTV2_CHANNEL5;
-      mEncodeChannel = M31_CH0;
 
     } else if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI) {
       if (mInputChannel == NTV2_CHANNEL1) {
@@ -1109,7 +811,6 @@ AJAStatus NTV2GstAV::SetupVideo (void)
         router.AddConnection(NTV2_Xpt425Mux4BInput, NTV2_XptSDIIn8);
       }
       mOutputChannel = NTV2_CHANNEL5;
-      mEncodeChannel = M31_CH0;
     } else {
       if (mInputChannel == NTV2_CHANNEL1) {
         router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_XptSDIIn2);
@@ -1121,7 +822,6 @@ AJAStatus NTV2GstAV::SetupVideo (void)
         router.AddConnection(NTV2_XptFrameBuffer8Input, NTV2_XptSDIIn8);
       }
       mOutputChannel = NTV2_CHANNEL5;
-      mEncodeChannel = M31_CH0;
     }
   }
 
@@ -1351,25 +1051,7 @@ NTV2GstAV::SetupHostBuffers (void)
   mVideoBufferSize =
       GetVideoActiveSize (mVideoFormat, mPixelFormat,
       mCaptureTall ? NTV2_VANCMODE_TALL : NTV2_VANCMODE_OFF);
-  mPicInfoBufferSize = sizeof (HevcPictureInfo) * 2;
-  mEncInfoBufferSize = sizeof (HevcEncodedInfo) * 2;
   mAudioBufferSize = NTV2_AUDIOSIZE_MAX;
-
-  if (mHevcOutput) {
-    mHevcInputCircularBuffer.SetAbortFlag (&mGlobalQuit);
-    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++) {
-      memset (&mHevcInputBuffer[bufferNdx], 0, sizeof (AjaVideoBuff));
-      mHevcInputBuffer[bufferNdx].pVideoBuffer =
-          new uint32_t[mVideoBufferSize / 4];
-      mHevcInputBuffer[bufferNdx].videoBufferSize = mVideoBufferSize;
-      mHevcInputBuffer[bufferNdx].videoDataSize = 0;
-      mHevcInputBuffer[bufferNdx].pInfoBuffer =
-          new uint32_t[mPicInfoBufferSize / 4];
-      mHevcInputBuffer[bufferNdx].infoBufferSize = mPicInfoBufferSize;
-      mHevcInputBuffer[bufferNdx].infoDataSize = 0;
-      mHevcInputCircularBuffer.Add (&mHevcInputBuffer[bufferNdx]);
-    }
-  }
 
   mDevice.DMABufferAutoLock(false, true, 0);
   GstAllocator *video_alloc = gst_aja_allocator_new(&mDevice, mVideoBufferSize, VIDEO_ARRAY_SIZE);
@@ -1381,8 +1063,7 @@ NTV2GstAV::SetupHostBuffers (void)
   gst_buffer_pool_config_set_params (config, NULL, mVideoBufferSize,
       VIDEO_ARRAY_SIZE, 0);
   gst_buffer_pool_config_set_allocator (config, video_alloc, NULL);
-  gst_structure_set (config, "is-video", G_TYPE_BOOLEAN, TRUE, "is-hevc",
-      G_TYPE_BOOLEAN, mHevcOutput, NULL);
+  gst_structure_set (config, "is-video", G_TYPE_BOOLEAN, TRUE, NULL);
   gst_buffer_pool_set_config (mVideoBufferPool, config);
   gst_buffer_pool_set_active (mVideoBufferPool, TRUE);
   gst_object_unref (video_alloc);
@@ -1393,8 +1074,7 @@ NTV2GstAV::SetupHostBuffers (void)
   gst_buffer_pool_config_set_params (config, NULL, mAudioBufferSize,
       AUDIO_ARRAY_SIZE, 0);
   gst_buffer_pool_config_set_allocator (config, audio_alloc, NULL);
-  gst_structure_set (config, "is-video", G_TYPE_BOOLEAN, FALSE, "is-hevc",
-      G_TYPE_BOOLEAN, FALSE, NULL);
+  gst_structure_set (config, "is-video", G_TYPE_BOOLEAN, FALSE, NULL);
   gst_buffer_pool_set_config (mAudioBufferPool, config);
   gst_buffer_pool_set_active (mAudioBufferPool, TRUE);
   gst_object_unref (audio_alloc);
@@ -1404,20 +1084,6 @@ NTV2GstAV::SetupHostBuffers (void)
 void
 NTV2GstAV::FreeHostBuffers (void)
 {
-  if (mHevcOutput) {
-    for (unsigned bufferNdx = 0; bufferNdx < VIDEO_RING_SIZE; bufferNdx++) {
-      if (mHevcInputBuffer[bufferNdx].pVideoBuffer) {
-        delete[]mHevcInputBuffer[bufferNdx].pVideoBuffer;
-        mHevcInputBuffer[bufferNdx].pVideoBuffer = NULL;
-      }
-      if (mHevcInputBuffer[bufferNdx].pInfoBuffer) {
-        delete[]mHevcInputBuffer[bufferNdx].pInfoBuffer;
-        mHevcInputBuffer[bufferNdx].pInfoBuffer = NULL;
-      }
-    }
-    mHevcInputCircularBuffer.Clear ();
-  }
-
   if (mVideoBufferPool) {
     gst_buffer_pool_set_active (mVideoBufferPool, FALSE);
     gst_object_unref (mVideoBufferPool);
@@ -1472,8 +1138,6 @@ AJAStatus NTV2GstAV::Run ()
   mLastFrame = false;
   mLastFrameInput = false;
   mLastFrameVideoOut = false;
-  mLastFrameHevc = false;
-  mLastFrameHevcOut = false;
   mLastFrameAudioOut = false;
   mGlobalQuit = false;
 
@@ -1489,12 +1153,6 @@ AJAStatus NTV2GstAV::Run ()
 
   // always start the AC thread
   StartACThread ();
-
-  // if doing hevc output then start the hevc threads
-  if (mHevcOutput) {
-    StartCodecRawThread ();
-    StartCodecHevcThread ();
-  }
 
   mStarted = true;
   return AJA_STATUS_SUCCESS;
@@ -1788,9 +1446,7 @@ NTV2GstAV::ACInputWorker (void)
       // At this point, there's at least one fully-formed frame available in the device's
       // frame buffer to transfer to the host. Reserve an AvaDataBuffer to "produce", and
       // use it in the next transfer from the device...
-      AjaVideoBuff *pVideoData (mHevcOutput ?
-          mHevcInputCircularBuffer.StartProduceNextBuffer () :
-          AcquireVideoBuffer ());
+      AjaVideoBuff *pVideoData (AcquireVideoBuffer ());
       GstMapInfo video_map, audio_map;
 
       iterations_without_frame = 0;
@@ -2015,29 +1671,6 @@ NTV2GstAV::ACInputWorker (void)
         }
       }
 
-      if (mWithInfo) {
-        // get picture and additional data pointers
-        HevcPictureInfo *pInfo = (HevcPictureInfo *) pVideoData->pInfoBuffer;
-        HevcPictureData *pPicData = &pInfo->pictureData;
-
-        // initialize info buffer to 0
-        memset (pInfo, 0, pVideoData->infoBufferSize);
-
-        // calculate pts based on 90 Khz clock tick
-        uint64_t pts =
-            (uint64_t) mTimeBase.FramesToMicroseconds (processed_frames) *
-            90000 / 1000000;
-
-        // set serial number, pts and picture number
-        pPicData->serialNumber = processed_frames; // can be anything
-        pPicData->ptsValueLow = (uint32_t) (pts & 0xffffffff);
-        pPicData->ptsValueHigh = (uint32_t) (pts >> 32);
-        pPicData->pictureNumber = processed_frames + 1;    // must count starting with 1
-
-        // set info data size
-        pVideoData->infoDataSize = sizeof (HevcPictureData);
-      }
-
       if (pVideoData->lastFrame && !mLastFrameInput) {
         GST_INFO ("Capture last frame number %" G_GUINT64_FORMAT, processed_frames);
         mLastFrameInput = true;
@@ -2045,18 +1678,14 @@ NTV2GstAV::ACInputWorker (void)
 
       processed_frames++;
 
-      if (mHevcOutput) {
-        mHevcInputCircularBuffer.EndProduceNextBuffer ();
-      } else {
-        // Possible callbacks are not setup yet so make sure we release the buffer if
-        // no one is there to catch them
-        if (!DoCallback (VIDEO_CALLBACK, pVideoData))
-          ReleaseVideoBuffer (pVideoData);
+      // Possible callbacks are not setup yet so make sure we release the buffer if
+      // no one is there to catch them
+      if (!DoCallback (VIDEO_CALLBACK, pVideoData))
+        ReleaseVideoBuffer (pVideoData);
 
-        if (pVideoData->lastFrame) {
-          GST_INFO ("Video out last frame number %" G_GUINT64_FORMAT, processed_frames);
-          mLastFrameVideoOut = true;
-        }
+      if (pVideoData->lastFrame) {
+        GST_INFO ("Video out last frame number %" G_GUINT64_FORMAT, processed_frames);
+        mLastFrameVideoOut = true;
       }
 
       // Possible callbacks are not setup yet so make sure we release the buffer if
@@ -2095,156 +1724,6 @@ NTV2GstAV::ACInputWorker (void)
 
   // Stop AutoCirculate...
   mDevice.AutoCirculateStop (mInputChannel);
-}
-
-// This is where we start the codec raw thread
-void
-NTV2GstAV::StartCodecRawThread (void)
-{
-  mCodecRawThread = new AJAThread ();
-  mCodecRawThread->Attach (CodecRawThreadStatic, this);
-  mCodecRawThread->SetPriority (AJA_ThreadPriority_High);
-  mCodecRawThread->Start ();
-}
-
-
-// This is where we stop the codec raw thread
-void
-NTV2GstAV::StopCodecRawThread (void)
-{
-  if (mCodecRawThread) {
-    while (mCodecRawThread->Active ())
-      AJATime::Sleep (10);
-
-    delete mCodecRawThread;
-    mCodecRawThread = NULL;
-  }
-}
-
-
-// The codec raw static callback
-void
-NTV2GstAV::CodecRawThreadStatic (AJAThread * pThread, void *pContext)
-{
-  (void) pThread;
-
-  NTV2GstAV *pApp (reinterpret_cast < NTV2GstAV * >(pContext));
-  pApp->CodecRawWorker ();
-}
-
-
-void
-NTV2GstAV::CodecRawWorker (void)
-{
-  uint64_t codecRawFrameCount = 0;
-
-  while (!mGlobalQuit) {
-    // wait for the next raw video frame
-    AjaVideoBuff
-        * pFrameData (mHevcInputCircularBuffer.StartConsumeNextBuffer ());
-    if (pFrameData) {
-      if (!mLastFrameVideoOut) {
-        // transfer the raw video frame to the codec
-        if (mWithInfo) {
-          mM31->RawTransfer (mEncodeChannel,
-              (uint8_t *) pFrameData->pVideoBuffer,
-              pFrameData->videoDataSize,
-              (uint8_t *) pFrameData->pInfoBuffer,
-              pFrameData->infoDataSize, pFrameData->lastFrame);
-        } else {
-          mM31->RawTransfer (mEncodeChannel,
-              (uint8_t *) pFrameData->pVideoBuffer,
-              pFrameData->videoDataSize, pFrameData->lastFrame);
-        }
-        if (pFrameData->lastFrame) {
-          mLastFrameVideoOut = true;
-        }
-
-        codecRawFrameCount++;
-      }
-      // release the raw video frame
-      mHevcInputCircularBuffer.EndConsumeNextBuffer ();
-    }
-  }                             // loop til quit signaled
-}
-
-
-// This is where we will start the codec hevc thread
-void
-NTV2GstAV::StartCodecHevcThread (void)
-{
-  mCodecHevcThread = new AJAThread ();
-  mCodecHevcThread->Attach (CodecHevcThreadStatic, this);
-  mCodecHevcThread->SetPriority (AJA_ThreadPriority_High);
-  mCodecHevcThread->Start ();
-}
-
-// This is where we will stop the codec hevc thread
-void
-NTV2GstAV::StopCodecHevcThread (void)
-{
-  if (mCodecHevcThread) {
-    while (mCodecHevcThread->Active ())
-      AJATime::Sleep (10);
-
-    delete mCodecHevcThread;
-    mCodecHevcThread = NULL;
-  }
-}
-
-
-// The codec hevc static callback
-void
-NTV2GstAV::CodecHevcThreadStatic (AJAThread * pThread, void *pContext)
-{
-  (void) pThread;
-
-  NTV2GstAV *pApp (reinterpret_cast < NTV2GstAV * >(pContext));
-  pApp->CodecHevcWorker ();
-}
-
-
-void
-NTV2GstAV::CodecHevcWorker (void)
-{
-  uint64_t hevcOutFrameCount = 0;
-
-  while (!mGlobalQuit) {
-
-    if (!mLastFrameHevcOut) {
-      AjaVideoBuff *pDstFrame = AcquireVideoBuffer ();
-      if (pDstFrame) {
-
-        // transfer an hevc frame from the codec including encoded information
-        mM31->EncTransfer (mEncodeChannel,
-            (uint8_t *) pDstFrame->pVideoBuffer,
-            pDstFrame->videoBufferSize,
-            (uint8_t *) pDstFrame->pInfoBuffer,
-            pDstFrame->infoBufferSize,
-            pDstFrame->videoDataSize,
-            pDstFrame->infoDataSize, pDstFrame->lastFrame);
-
-        // FIXME: these are not passed properly from AC thread to here
-        // pDstFrame->frameNumber = pFrameData->frameNumber;
-        // pDstFrame->timeCodeDBB = pFrameData->timeCodeDBB;
-        // pDstFrame->timeCodeLow = pFrameData->timeCodeLow;
-        // pDstFrame->timeCodeHigh = pFrameData->timeCodeHigh;
-        // pDstFrame->timeStamp = pFrameData->timeStamp;
-
-        // Possible callbacks are not setup yet so make sure we release the buffer if
-        // no one is there to catch them
-        if (!DoCallback (VIDEO_CALLBACK, pDstFrame))
-          ReleaseVideoBuffer (pDstFrame);
-      }
-
-      if (pDstFrame->lastFrame) {
-        GST_INFO ("Hevc out last frame number %" G_GUINT64_FORMAT, hevcOutFrameCount);
-        mLastFrameHevcOut = true;
-      }
-
-      hevcOutFrameCount++;
-    }
-  }                             //    loop til quit signaled
 }
 
 void

@@ -168,54 +168,6 @@ typedef enum
 #define GST_TYPE_AJA_MODE_RAW (gst_aja_mode_get_type_raw ())
 GType gst_aja_mode_get_type_raw (void);
 
-typedef enum
-{
-    GST_AJA_MODE_HEVC_NTSC_420_8_5994i,
-    GST_AJA_MODE_HEVC_NTSC_422_10_5994i,
-    
-    GST_AJA_MODE_HEVC_PAL_420_8_50i,
-    GST_AJA_MODE_HEVC_PAL_422_10_50i,
-    
-    GST_AJA_MODE_HEVC_720_420_8_50p,
-    GST_AJA_MODE_HEVC_720_420_8_5994p,
-    GST_AJA_MODE_HEVC_720_420_8_60p,
-    GST_AJA_MODE_HEVC_720_422_10_50p,
-    GST_AJA_MODE_HEVC_720_422_10_5994p,
-    GST_AJA_MODE_HEVC_720_422_10_60p,
-    
-    GST_AJA_MODE_HEVC_1080_420_8_50i,
-    GST_AJA_MODE_HEVC_1080_420_8_50p,
-    GST_AJA_MODE_HEVC_1080_420_8_5994i,
-    GST_AJA_MODE_HEVC_1080_420_8_5994p,
-    GST_AJA_MODE_HEVC_1080_420_8_60i,
-    GST_AJA_MODE_HEVC_1080_420_8_60p,
-    
-    GST_AJA_MODE_HEVC_1080_422_10_50i,
-    GST_AJA_MODE_HEVC_1080_422_10_50p,
-    GST_AJA_MODE_HEVC_1080_422_10_5994i,
-    GST_AJA_MODE_HEVC_1080_422_10_5994p,
-    GST_AJA_MODE_HEVC_1080_422_10_60i,
-    GST_AJA_MODE_HEVC_1080_422_10_60p,
-    
-    GST_AJA_MODE_HEVC_UHD_420_8_50p,
-    GST_AJA_MODE_HEVC_UHD_420_8_5994p,
-    GST_AJA_MODE_HEVC_UHD_420_8_60p,
-    
-    GST_AJA_MODE_HEVC_UHD_420_10_50p,
-    GST_AJA_MODE_HEVC_UHD_420_10_5994p,
-    GST_AJA_MODE_HEVC_UHD_420_10_60p,
-    
-    GST_AJA_MODE_HEVC_UHD_422_10_50p,
-    GST_AJA_MODE_HEVC_UHD_422_10_5994p,
-    GST_AJA_MODE_HEVC_UHD_422_10_60p,
-
-    GST_AJA_MODE_HEVC_END
-
-} GstAjaModeHevcEnum;
-
-#define GST_TYPE_AJA_MODE_HEVC (gst_aja_mode_get_type_hevc ())
-GType gst_aja_mode_get_type_hevc (void);
-
 typedef enum {
   GST_AJA_VIDEO_INPUT_MODE_SDI,
   GST_AJA_VIDEO_INPUT_MODE_HDMI,
@@ -249,7 +201,7 @@ typedef enum {
 #define GST_TYPE_AJA_AUDIO_INPUT_MODE (gst_aja_audio_input_mode_get_type ())
 GType gst_aja_audio_input_mode_get_type (void);
 
-// Used to keep track of engine when shared between audio/hevc/and video
+// Used to keep track of engine when shared between audio and video
 typedef enum
 {
     NTV2_EngineStateUndefined,
@@ -261,7 +213,6 @@ typedef enum
 typedef struct _GstAjaMode GstAjaMode;
 struct _GstAjaMode
 {    
-    M31VideoPreset          videoPreset;
     NTV2VideoFormat         videoFormat;
     int                     width;
     int                     height;
@@ -278,7 +229,6 @@ struct _GstAjaMode
 
 
 const GstAjaMode * gst_aja_get_mode_raw (GstAjaModeRawEnum e);
-const GstAjaMode * gst_aja_get_mode_hevc (GstAjaModeHevcEnum e);
 
 GstCaps * gst_aja_mode_get_caps_raw (GstAjaModeRawEnum e);
 GstCaps * gst_aja_mode_get_template_caps_raw (void);
@@ -286,7 +236,7 @@ GstCaps * gst_aja_mode_get_template_caps_raw (void);
 typedef struct _GstAjaOutput GstAjaOutput;
 struct _GstAjaOutput
 {
-    NTV2GstAV       *ntv2AVHevc;
+    NTV2GstAV           *ntv2AV;
     NTV2EngineState     ntv2EngineState;
     const GstAjaMode    *mode;
     
@@ -308,7 +258,7 @@ struct _GstAjaOutput
 typedef struct _GstAjaInput GstAjaInput;
 struct _GstAjaInput
 {
-    NTV2GstAV       *ntv2AVHevc;
+    NTV2GstAV           *ntv2AV;
     NTV2EngineState     ntv2EngineState;
     const GstAjaMode    *mode;
 
@@ -320,8 +270,6 @@ struct _GstAjaInput
     gboolean            audio_enabled;
     GstElement          *videosrc;
     gboolean            video_enabled;
-    GstElement          *hevcsrc;
-    gboolean            hevc_enabled;
     void (*start_streams) (GstElement *videosrc);
 };
 
@@ -355,8 +303,7 @@ struct _GstAjaClockClass
 
 GType gst_aja_clock_get_type (void);
 
-GstAjaInput *  gst_aja_acquire_input (const gchar * deviceIdentifier, gint channel, GstElement * src, gboolean is_audio, gboolean is_hevc);
-
+GstAjaInput *  gst_aja_acquire_input (const gchar * deviceIdentifier, gint channel, GstElement * src, gboolean is_audio);
 
 #define GST_TYPE_AJA_BUFFER_POOL \
 (gst_aja_buffer_pool_get_type())
@@ -378,7 +325,7 @@ struct _GstAjaBufferPool
 {
     GstBufferPool buffer_pool;
 
-    gboolean is_video, is_hevc;
+    gboolean is_video;
     guint size;
 };
 
