@@ -74,6 +74,7 @@ struct _GstAjaVideoSrc
     GstAjaTimecodeMode          timecode_mode;
     gboolean                    output_cc;
     gint			last_cc_vbi_line;
+    guint                       capture_cpu_core;
 
     guint skipped_last;
     guint64 skipped_overall;

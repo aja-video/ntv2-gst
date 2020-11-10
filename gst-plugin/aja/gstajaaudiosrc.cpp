@@ -90,8 +90,8 @@ aja_capture_audio_packet_clear (void *data)
 {
   AjaCaptureAudioPacket *packet = (AjaCaptureAudioPacket *) data;
 
-  if ((packet->audio_src->input) && (packet->audio_src->input->ntv2AVHevc))
-    packet->audio_src->input->ntv2AVHevc->
+  if ((packet->audio_src->input) && (packet->audio_src->input->ntv2AV))
+    packet->audio_src->input->ntv2AV->
         ReleaseAudioBuffer (packet->audio_buff);
   memset(packet, 0, sizeof (*packet));
 }
@@ -470,14 +470,14 @@ gst_aja_audio_src_open (GstAjaAudioSrc * src)
 
   src->input =
       gst_aja_acquire_input (src->device_identifier, src->input_channel,
-      GST_ELEMENT_CAST (src), TRUE, FALSE);
+      GST_ELEMENT_CAST (src), TRUE);
   if (!src->input) {
     GST_ERROR_OBJECT (src, "Failed to acquire input");
     return FALSE;
   }
 
   g_mutex_lock (&src->input->lock);
-  status = src->input->ntv2AVHevc->Open ();
+  status = src->input->ntv2AV->Open ();
   if (!AJA_SUCCESS (status)) {
     GST_ERROR_OBJECT (src, "Failed to open input");
     g_mutex_unlock (&src->input->lock);
@@ -506,7 +506,7 @@ gst_aja_audio_src_open (GstAjaAudioSrc * src)
       break;
   }
 
-  status = src->input->ntv2AVHevc->InitAudio (audio_source, &src->channels);
+  status = src->input->ntv2AV->InitAudio (audio_source, &src->channels);
   if (status != AJA_STATUS_SUCCESS) {
     GST_ERROR_OBJECT (src, "Failed to initialize audio");
     g_mutex_unlock (&src->input->lock);
@@ -544,7 +544,7 @@ gst_aja_audio_src_stop (GstAjaAudioSrc * src)
   if (src->input && src->input->audio_enabled) {
     g_mutex_lock (&src->input->lock);
     src->input->audio_enabled = FALSE;
-    src->input->ntv2AVHevc->SetCallback (AUDIO_CALLBACK, 0, 0);
+    src->input->ntv2AV->SetCallback (AUDIO_CALLBACK, 0, 0);
     g_mutex_unlock (&src->input->lock);
   }
 
@@ -584,7 +584,7 @@ gst_aja_audio_src_change_state (GstElement * element, GstStateChange transition)
       g_mutex_lock (&src->input->lock);
       if (src->input->videosrc)
         videosrc = GST_ELEMENT_CAST (gst_object_ref (src->input->videosrc));
-      src->input->ntv2AVHevc->SetCallback (AUDIO_CALLBACK,
+      src->input->ntv2AV->SetCallback (AUDIO_CALLBACK,
           &gst_aja_audio_src_audio_callback, src);
       g_mutex_unlock (&src->input->lock);
 
@@ -647,7 +647,7 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
   if (!audioBuff || !audioBuff->haveSignal) {
     src->had_signal = FALSE;
     if (audioBuff)
-      src->input->ntv2AVHevc->ReleaseAudioBuffer (audioBuff);
+      src->input->ntv2AV->ReleaseAudioBuffer (audioBuff);
     return;
   }
 
@@ -673,7 +673,7 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
           GST_TIME_FORMAT, GST_TIME_ARGS (stream_time),
           GST_TIME_ARGS (videosrc->skip_first_time + videosrc->first_time));
       src->had_signal = TRUE;
-      src->input->ntv2AVHevc->ReleaseAudioBuffer (audioBuff);
+      src->input->ntv2AV->ReleaseAudioBuffer (audioBuff);
       return;
     }
 
@@ -749,7 +749,7 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
     g_mutex_unlock (&src->lock);
   } else {
     g_mutex_unlock (&src->lock);
-    src->input->ntv2AVHevc->ReleaseAudioBuffer (audioBuff);
+    src->input->ntv2AV->ReleaseAudioBuffer (audioBuff);
   }
 }
 

@@ -6,8 +6,8 @@
 **/
 
 
-#ifndef _NTV2ENCODEHEVC_H
-#define _NTV2ENCODEHEVC_H
+#ifndef _NTV2ENCODE_H
+#define _NTV2ENCODE_H
 
 #include <gst/gst.h>
 
@@ -53,10 +53,6 @@ typedef struct
     uint32_t        videoBufferSize;        /// Size of host video buffer (bytes)
     uint32_t        videoDataSize;          /// Size of video data (bytes)
     uint32_t *      pAncillaryData;           /// Pointer to host ancillary data
-
-    uint32_t *      pInfoBuffer;            /// Picture information (raw) or encode information (hevc)
-    uint32_t        infoBufferSize;         /// Size of the host information buffer (bytes)
-    uint32_t        infoDataSize;           /// Size of the information data (bytes)
 
     uint64_t        frameNumber;            /// Frame number
     uint8_t         fieldCount;             /// Number of fields
@@ -117,7 +113,7 @@ class NTV2GstAV
             @param[in]    inM31Preset            Specifies the m31 preset to use.
                                             Defaults to 8-bit 1280x720 5994p.
             @param[in]    inPixelFormat        Specifies the pixel format to use.
-                                          aja_video_src->ntv2Hevc->  Defaults to NTV2_FBF_10BIT_YCBCR_420PL.
+                                            Defaults to NTV2_FBF_10BIT_YCBCR_420PL.
             @param[in]    inQuadMode          Specifies UHD mode.
                                             Defaults to HD mode.
             @param[in]    inAudioChannels        Specifies number of audio channels to write to AIFF file.
@@ -143,18 +139,16 @@ class NTV2GstAV
         /**
             @brief    Initializes me and prepares me to Run.
         **/
-        virtual AJAStatus Init (const M31VideoPreset            inPreset        = M31_FILE_720X480_420_8_5994i,
-                                const NTV2VideoFormat           inVideoFormat   = NTV2_FORMAT_525_5994,
+        virtual AJAStatus Init (const NTV2VideoFormat           inVideoFormat   = NTV2_FORMAT_525_5994,
                                 const NTV2InputSource           inInputSource   = NTV2_INPUTSOURCE_SDI1,
                                 const uint32_t                  inBitDepth      = 8,
                                 const bool                      inIs422         = false,
                                 const bool                      inIsAuto        = false,
-                                const bool                      inHevcOutput    = false,
                                 const SDIInputMode              inSDIInputMode  = SDI_INPUT_MODE_SINGLE_LINK,
                                 const NTV2TCIndex               inTimeCode      = NTV2_TCINDEX_SDI1,
-                                const bool                      inInfoData      = false,
 				const bool                      inCaptureTall   = false,
-                                const bool                      inPassthrough   = false);
+                                const bool                      inPassthrough   = false,
+                                const uint32_t                  inCaptureCPUCore = -1);
 
         virtual AJAStatus InitAudio (const NTV2AudioSource inAudioSource, uint32_t *numAudioChannels);
 
@@ -220,11 +214,6 @@ class NTV2GstAV
     //    Protected Instance Methods
     protected:
         /**
-            @brief    Sets up everything I need for encoding video.
-         **/
-        virtual AJAStatus        SetupHEVC (void);
-
-        /**
             @brief    Sets up everything I need for capturing video.
         **/
         virtual AJAStatus        SetupVideo (void);
@@ -235,7 +224,7 @@ class NTV2GstAV
         virtual AJAStatus        SetupAudio (void);
 
         /**
-            @brief    Sets/Frees up my circular aja_video_src->ntv2Hevc->buffers.
+            @brief    Sets/Frees up my circular aja_video_src->ntv2->buffers.
         **/
         virtual void            SetupHostBuffers (void);
         virtual void            FreeHostBuffers (void);
@@ -252,59 +241,20 @@ class NTV2GstAV
         virtual void            StopACThread (void);
 
         /**
-            @brief    Start the codec raw thread.  
-        **/
-        virtual void            StartCodecRawThread (void);
-        virtual void            StopCodecRawThread (void);
-
-        /**
-            @brief    Start the codec hevc thread.  
-        **/
-        virtual void            StartCodecHevcThread (void);
-        virtual void            StopCodecHevcThread (void);
-
-        /**
             @brief    Repeatedly captures video frames using AutoCirculate and sends them to the raw
-                      audio/video consumers, or the HEVC worker threads
+                      audio/video consumers
         **/
         virtual void            ACInputWorker (void);
 
-        /**
-            @brief    Repeatedly removes video frames from the raw video ring and transfers
-                    them to the codec.
-        **/
-        virtual void            CodecRawWorker (void);
-
-        /**
-            @brief    Repeatedly transfers hevc frames from the codec and sends them to the consumer.
-        **/
-        virtual void            CodecHevcWorker (void);
-
         //    Protected Class Methods
     protected:
-        /**aja_video_src->ntv2Hevc->
+        /**aja_video_src->ntv2->
             @brief    This is the video input thread's static callback function that gets called when the thread starts.
                     This function gets "Attached" to the AJAThread instance.
             @param[in]    pThread        Points to the AJAThread instance.
             @param[in]    pContext    Context information to pass to the thread.
         **/
         static void                ACInputThreadStatic (AJAThread * pThread, void * pContext);
-
-        /**
-            @brief    This is the codec raw thread's static callback function that gets called when the thread starts.
-                    This function gets "Attached" to the consumer thread's AJAThread instance.
-            @param[in]    pThread        A valid pointer to the consumer thread's AJAThread instance.
-            @param[in]    pContext    Context information to pass to the thread.
-        **/
-        static void                CodecRawThreadStatic (AJAThread * pThread, void * pContext);
-
-        /**
-            @brief    This is the codec hevc thread's static callback function that gets called when the thread starts.
-                    This function gets "Attached" to the consumer thread's AJAThread instance.
-            @param[in]    pThread        A valid pointer to the consumer thread's AJAThread instance.
-            @param[in]    pContext    Context information to pass to the thread.
-        **/
-        static void                CodecHevcThreadStatic (AJAThread * pThread, void * pContext);
 
     private:
     
@@ -316,19 +266,13 @@ class NTV2GstAV
     //    Private Member Data
     private:
         AJAThread *                    mACInputThread;         ///    AutoCirculate input thread
-        AJAThread *                    mCodecRawThread;        ///    Codec raw transfer
-        AJAThread *                    mCodecHevcThread;        ///    Codec hevc transfer thread
-        CNTV2m31 *                    mM31;                    /// Object used to interface to m31
         AJALock *                    mLock;                  /// My mutex object
 
         CNTV2Card                    mDevice;                ///    CNTV2Card instance
         NTV2DeviceID                mDeviceID;                ///    Device identifier
         const std::string            mDeviceSpecifier;        ///    The device specifier string
-        bool                        mHevcOutput;            /// Output compressed data
         NTV2Channel                 mInputChannel;            ///    Input channel
         NTV2Channel                 mOutputChannel;            ///    Output channel
-        M31Channel                  mEncodeChannel;         /// Encoder channel
-        M31VideoPreset                mPreset;                /// M31 HEVC Preset 
         NTV2InputSource                mInputSource;            ///    The input source I'm using
         NTV2VideoFormat                mVideoFormat;            ///    Video format
         NTV2FrameBufferFormat        mPixelFormat;            ///    Pixel format
@@ -338,9 +282,9 @@ class NTV2GstAV
         SDIInputMode                mSDIInputMode;           /// SDI input mode
         bool                        mQuad;
         bool                        mMultiStream;            /// Demonstrates how to configure the board for multi-stream
-        bool                        mWithInfo;              /// Demonstrates how to configure picture information mode
         NTV2TCIndex                 mTimecodeMode;        /// Add timecode burn
 	bool                        mCaptureTall;	    /// Capture Tall Video
+        uint32_t                    mCaptureCPUCore;
         NTV2InputSource             mVideoSource;
         bool                        mPassthrough;
         NTV2AudioSystem             mAudioSystem;            ///    The audio system I'm using
@@ -349,8 +293,6 @@ class NTV2GstAV
         bool                        mLastFrame;                ///    Set "true" to signal last frame
         bool                        mLastFrameInput;        ///    Set "true" to signal last frame captured from input
         bool                        mLastFrameVideoOut;     ///    Set "true" to signal last frame of video output
-        bool                        mLastFrameHevc;            ///    Set "true" to signal last frame transfered from codec
-        bool                        mLastFrameHevcOut;      ///    Set "true" to signal last frame of Hevc output
         bool                        mLastFrameAudioOut;        ///    Set "true" to signal last frame of audio output
         bool                        mGlobalQuit;            ///    Set "true" to gracefully stop
         bool                        mStarted;               ///    Set "true" when threads are running
@@ -362,11 +304,8 @@ class NTV2GstAV
 
         NTV2Callback               mVideoCallback;         /// Callback for video output
         void *                     mVideoCallbackRefcon;   /// Callback refcon for video output
-        NTV2Callback               mAudioCallback;         /// Callback for HEVC output (compressed frames)
+        NTV2Callback               mAudioCallback;         /// Callback for audio output
         void *                     mAudioCallbackRefcon;   /// Callback refcon for AC output
-
-        AjaVideoBuff                            mHevcInputBuffer [VIDEO_RING_SIZE];           ///    My Hevc input buffers
-        AJACircularBuffer <AjaVideoBuff *>      mHevcInputCircularBuffer;                     ///    My Hevc input ring
 
         GstBufferPool *                         mAudioBufferPool;
         GstBufferPool *                         mVideoBufferPool;
@@ -376,6 +315,6 @@ class NTV2GstAV
     
         AJATimeBase                 mTimeBase;                                              /// Timebase for timecode string
 
-};    //    NTV2EncodeHEVC
+};    //    NTV2Encode
 
-#endif    //    _NTV2ENCODEHEVC_H
+#endif    //    _NTV2ENCODE_H

@@ -43,6 +43,7 @@ GST_DEBUG_CATEGORY_STATIC (gst_aja_video_src_debug);
 #define DEFAULT_SKIP_FIRST_TIME    (0)
 #define DEFAULT_TIMECODE_MODE	   (GST_AJA_TIMECODE_MODE_VITC1)
 #define DEFAULT_OUTPUT_CC	   (FALSE)
+#define DEFAULT_CAPTURE_CPU_CORE   ((guint)-1)
 
 enum
 {
@@ -58,7 +59,8 @@ enum
   PROP_SKIP_FIRST_TIME,
   PROP_TIMECODE_MODE,
   PROP_OUTPUT_CC,
-  PROP_SIGNAL
+  PROP_SIGNAL,
+  PROP_CAPTURE_CPU_CORE,
 };
 
 typedef enum {
@@ -83,8 +85,8 @@ aja_capture_video_frame_clear (void *data)
 {
   AjaCaptureVideoFrame *frame = (AjaCaptureVideoFrame *) data;
 
-  if ((frame->video_buff) && (frame->video_src->input) && (frame->video_src->input->ntv2AVHevc))
-    frame->video_src->input->ntv2AVHevc->ReleaseVideoBuffer (frame->video_buff);
+  if ((frame->video_buff) && (frame->video_src->input) && (frame->video_src->input->ntv2AV))
+    frame->video_src->input->ntv2AV->ReleaseVideoBuffer (frame->video_buff);
   memset(frame, 0, sizeof (*frame));
 }
 
@@ -223,6 +225,14 @@ gst_aja_video_src_class_init (GstAjaVideoSrcClass * klass)
           "True if there is a valid input signal available",
           FALSE, (GParamFlags) (G_PARAM_READABLE | G_PARAM_STATIC_STRINGS)));
 
+  g_object_class_install_property (gobject_class, PROP_CAPTURE_CPU_CORE,
+      g_param_spec_uint ("capture-cpu-core",
+          "Capture CPU Core",
+          "Sets the affinity of the capture thread to this CPU core (-1=disabled)",
+          0, G_MAXUINT, DEFAULT_CAPTURE_CPU_CORE,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+              G_PARAM_CONSTRUCT)));
+
   templ_caps = gst_aja_mode_get_template_caps_raw ();
   gst_element_class_add_pad_template (element_class,
       gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS, templ_caps));
@@ -250,6 +260,7 @@ gst_aja_video_src_init (GstAjaVideoSrc * src)
   src->output_stream_time = DEFAULT_OUTPUT_STREAM_TIME;
   src->skip_first_time = DEFAULT_SKIP_FIRST_TIME;
   src->timecode_mode = DEFAULT_TIMECODE_MODE;
+  src->capture_cpu_core = DEFAULT_CAPTURE_CPU_CORE;
 
   src->window_size = 64;
   src->times = g_new (GstClockTime, 4 * src->window_size);
@@ -323,7 +334,7 @@ gst_aja_video_src_set_property (GObject * object, guint property_id,
 
     case PROP_TIMECODE_MODE:
       src->timecode_mode = (GstAjaTimecodeMode) g_value_get_enum (value);
-      if (src->input && src->input->ntv2AVHevc) {
+      if (src->input && src->input->ntv2AV) {
         NTV2TCIndex timecode_mode;
 
         switch (src->timecode_mode) {
@@ -351,7 +362,7 @@ gst_aja_video_src_set_property (GObject * object, guint property_id,
             g_assert_not_reached ();
             break;
         }
-        src->input->ntv2AVHevc->UpdateTimecodeIndex(timecode_mode);
+        src->input->ntv2AV->UpdateTimecodeIndex(timecode_mode);
       }
 
       break;
@@ -362,6 +373,10 @@ gst_aja_video_src_set_property (GObject * object, guint property_id,
 #else
       src->output_cc = FALSE;
 #endif
+      break;
+
+    case PROP_CAPTURE_CPU_CORE:
+      src->capture_cpu_core = g_value_get_uint (value);
       break;
 
     default:
@@ -424,6 +439,10 @@ gst_aja_video_src_get_property (GObject * object, guint property_id,
 
     case PROP_SIGNAL:
       g_value_set_boolean (value, src->signal_state == SIGNAL_STATE_AVAILABLE);
+      break;
+
+    case PROP_CAPTURE_CPU_CORE:
+      g_value_set_uint (value, src->capture_cpu_core);
       break;
 
     default:
@@ -577,7 +596,7 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
 
   src->input =
       gst_aja_acquire_input (src->device_identifier, src->input_channel,
-      GST_ELEMENT_CAST (src), FALSE, FALSE);
+      GST_ELEMENT_CAST (src), FALSE);
   if (!src->input) {
     GST_ERROR_OBJECT (src, "Failed to acquire input");
     return FALSE;
@@ -590,7 +609,7 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
   src->input->mode = mode;
   src->input->start_streams = gst_aja_video_src_start_streams;
 
-  status = src->input->ntv2AVHevc->Open ();
+  status = src->input->ntv2AV->Open ();
   if (!AJA_SUCCESS (status)) {
     GST_ERROR_OBJECT (src, "Failed to open input");
     g_mutex_unlock (&src->input->lock);
@@ -641,15 +660,13 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
       break;
   }
 
-  status = src->input->ntv2AVHevc->Init (src->input->mode->videoPreset,
-      src->input->mode->videoFormat,
+  status = src->input->ntv2AV->Init (src->input->mode->videoFormat,
       input_source,
       src->input->mode->bitDepth,
       src->input->mode->is422,
       false,
-      false,
       src->sdi_input_mode, timecode_mode, false, src->output_cc ? true : false,
-      src->passthrough ? true : false);
+      src->passthrough ? true : false, src->capture_cpu_core);
   if (!AJA_SUCCESS (status)) {
     GST_ERROR_OBJECT (src, "Failed to initialize input");
     g_mutex_unlock (&src->input->lock);
@@ -669,11 +686,11 @@ gst_aja_video_src_close (GstAjaVideoSrc * src)
   if (src->input) {
     g_mutex_lock (&src->input->lock);
 
-    if (src->input->ntv2AVHevc) {
-      src->input->ntv2AVHevc->Quit ();
-      src->input->ntv2AVHevc->Close ();
-      delete src->input->ntv2AVHevc;
-      src->input->ntv2AVHevc = NULL;
+    if (src->input->ntv2AV) {
+      src->input->ntv2AV->Quit ();
+      src->input->ntv2AV->Close ();
+      delete src->input->ntv2AV;
+      src->input->ntv2AV = NULL;
       GST_DEBUG_OBJECT (src, "shut down ntv2HEVC");
     }
 
@@ -697,9 +714,9 @@ gst_aja_video_src_stop (GstAjaVideoSrc * src)
 
   if (src->input && src->input->video_enabled) {
     g_mutex_lock (&src->input->lock);
-    src->input->ntv2AVHevc->Quit ();
+    src->input->ntv2AV->Quit ();
     src->input->video_enabled = FALSE;
-    src->input->ntv2AVHevc->SetCallback (VIDEO_CALLBACK, 0, 0);
+    src->input->ntv2AV->SetCallback (VIDEO_CALLBACK, 0, 0);
     g_mutex_unlock (&src->input->lock);
   }
 
@@ -744,9 +761,9 @@ gst_aja_video_src_start_streams (GstElement * element)
     src->next_time_mapping.den = 1;
     g_mutex_unlock (&src->lock);
 
-    if (src->input->ntv2AVHevc) {
+    if (src->input->ntv2AV) {
       src->input->started = TRUE;
-      src->input->ntv2AVHevc->Run ();
+      src->input->ntv2AV->Run ();
     }
   } else {
     GST_DEBUG_OBJECT (src, "Not starting streams yet");
@@ -769,7 +786,7 @@ gst_aja_video_src_change_state (GstElement * element, GstStateChange transition)
 
     case GST_STATE_CHANGE_READY_TO_PAUSED:
       g_mutex_lock (&src->input->lock);
-      src->input->ntv2AVHevc->SetCallback (VIDEO_CALLBACK,
+      src->input->ntv2AV->SetCallback (VIDEO_CALLBACK,
           &gst_aja_video_src_video_callback, src);
       g_mutex_unlock (&src->input->lock);
       src->flushing = FALSE;
@@ -972,7 +989,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
 
   // Check if we have no signal
   if (videoBuff && !videoBuff->haveSignal) {
-    src->input->ntv2AVHevc->ReleaseVideoBuffer (videoBuff);
+    src->input->ntv2AV->ReleaseVideoBuffer (videoBuff);
     videoBuff = NULL;
   }
 
@@ -1034,7 +1051,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
         "Skipping frame as requested: %" GST_TIME_FORMAT " < %" GST_TIME_FORMAT,
         GST_TIME_ARGS (stream_time),
         GST_TIME_ARGS (src->skip_first_time + src->first_time));
-    src->input->ntv2AVHevc->ReleaseVideoBuffer (videoBuff);
+    src->input->ntv2AV->ReleaseVideoBuffer (videoBuff);
     return;
   }
 
@@ -1119,7 +1136,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
     g_mutex_unlock (&src->lock);
   } else {
     g_mutex_unlock (&src->lock);
-    src->input->ntv2AVHevc->ReleaseVideoBuffer (videoBuff);
+    src->input->ntv2AV->ReleaseVideoBuffer (videoBuff);
   }
 }
 
