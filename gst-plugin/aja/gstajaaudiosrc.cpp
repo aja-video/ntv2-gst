@@ -642,6 +642,7 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
 {
   GstAjaVideoSrc *videosrc = NULL;
   GstClockTime stream_time, timestamp;
+  gboolean had_signal;
 
   // Just return if we have no signal
   if (!audioBuff || !audioBuff->haveSignal) {
@@ -692,6 +693,7 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
   }
 
   g_mutex_lock (&src->lock);
+  had_signal = src->had_signal;
   src->had_signal = TRUE;
   if (!src->flushing) {
     guint skipped_frames = 0;
@@ -740,7 +742,7 @@ gst_aja_audio_src_got_packet (GstAjaAudioSrc * src, AjaAudioBuff * audioBuff)
     f.audio_buff = audioBuff;
     f.capture_time = timestamp;
     f.stream_time = stream_time;
-    f.first_buffer = !src->had_signal;
+    f.first_buffer = !had_signal;
     if (skipped_before)
       audioBuff->droppedChanged = TRUE;
 

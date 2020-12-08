@@ -78,6 +78,7 @@ typedef struct
   GstClockTime capture_time;
   GstClockTime stream_time;
   GstAjaModeRawEnum mode;
+  gboolean first_buffer;
 } AjaCaptureVideoFrame;
 
 static void
@@ -963,6 +964,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
   GstClockTime now_sys, now_pipeline, capture_pipeline;
   GstClockTime capture_delay = 0, base_time;
   GstClockTime stream_time, timestamp;
+  gboolean had_signal = TRUE;
 
   clock = gst_element_get_clock (GST_ELEMENT_CAST (src));
   base_time = gst_element_get_base_time (GST_ELEMENT_CAST (src));
@@ -1029,6 +1031,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
         gst_queue_array_push_tail_struct (src->current_frames, &f);
         g_cond_signal (&src->cond);
       }
+      had_signal = FALSE;
     }
 
     src->discont_time = capture_pipeline;
@@ -1127,6 +1130,7 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
     f.stream_time = stream_time;
     f.mode = src->modeEnum;
     f.signal_change = NO_CHANGE;
+    f.first_buffer = !had_signal;
 
     if (skipped_before)
       videoBuff->droppedChanged = true;
@@ -1352,7 +1356,7 @@ retry:
   timecode_high = f.video_buff->timeCodeHigh;
   timecode_low = f.video_buff->timeCodeLow;
   ancillary_data = (guint8 *) f.video_buff->pAncillaryData;
-  discont = f.video_buff->droppedChanged;
+  discont = f.first_buffer || f.video_buff->droppedChanged;
 
   if (f.video_buff->droppedChanged) {
     GstMessage *msg;
