@@ -98,6 +98,7 @@ static void gst_aja_video_src_get_property (GObject * object, guint property_id,
 static void gst_aja_video_src_finalize (GObject * object);
 
 static gboolean gst_aja_video_src_query (GstBaseSrc * src, GstQuery * query);
+static GstCaps * gst_aja_video_src_get_caps (GstBaseSrc * src, GstCaps * filter);
 static gboolean gst_aja_video_src_unlock (GstBaseSrc * src);
 static gboolean gst_aja_video_src_unlock_stop (GstBaseSrc * src);
 
@@ -137,6 +138,7 @@ gst_aja_video_src_class_init (GstAjaVideoSrcClass * klass)
 
   basesrc_class->query = GST_DEBUG_FUNCPTR (gst_aja_video_src_query);
   basesrc_class->negotiate = NULL;
+  basesrc_class->get_caps = GST_DEBUG_FUNCPTR (gst_aja_video_src_get_caps);
   basesrc_class->unlock = GST_DEBUG_FUNCPTR (gst_aja_video_src_unlock);
   basesrc_class->unlock_stop =
       GST_DEBUG_FUNCPTR (gst_aja_video_src_unlock_stop);
@@ -506,6 +508,22 @@ gst_aja_video_src_start (GstAjaVideoSrc *src)
   src->skip_to_timestamp = GST_CLOCK_TIME_NONE;
 
   return TRUE;
+}
+
+static GstCaps *
+gst_aja_video_src_get_caps (GstBaseSrc * bsrc, GstCaps * filter)
+{
+  GstAjaVideoSrc *src = GST_AJA_VIDEO_SRC (bsrc);
+  GstCaps *caps;
+
+  caps = gst_aja_mode_get_caps_raw (src->modeEnum);
+  if (filter) {
+    GstCaps *tmp = gst_caps_intersect_full (filter, caps, GST_CAPS_INTERSECT_FIRST);
+    gst_caps_unref (caps);
+    caps = tmp;
+  }
+
+  return caps;
 }
 
 static gboolean
