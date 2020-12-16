@@ -847,6 +847,8 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
   // Convert to the sample numbers
   start_offset = gst_util_uint64_scale (start_time, src->info.rate, GST_SECOND);
+  // Convert back to round down to a sample multiple and get rid of rounding errors
+  start_time = gst_util_uint64_scale (start_offset, GST_SECOND, src->info.rate);
 
   end_offset = start_offset + sample_count;
   end_time = gst_util_uint64_scale_int (end_offset, GST_SECOND, src->info.rate);
