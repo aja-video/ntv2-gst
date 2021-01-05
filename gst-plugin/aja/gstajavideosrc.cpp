@@ -1115,6 +1115,8 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
       GST_WARNING_OBJECT (src, "Starting to drop frames");
     }
 
+    src->skipped_last += skipped_frames;
+
     if (skipped_frames == 0 && src->skipped_last > 0) {
       GST_ELEMENT_WARNING_WITH_DETAILS (src,
           STREAM, FAILED,
@@ -1130,8 +1132,6 @@ gst_aja_video_src_got_frame (GstAjaVideoSrc * src, AjaVideoBuff * videoBuff)
       src->skipped_last = 0;
       skipped_before = TRUE;
     }
-
-    src->skipped_last += skipped_frames;
 
     // Write the GOT_SIGNAL change into the oldest frame again
     if (signal_change != NO_CHANGE) {
