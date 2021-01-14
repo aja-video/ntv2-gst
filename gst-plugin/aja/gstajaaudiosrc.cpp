@@ -871,7 +871,9 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
         GST_SECOND);
 
     // Discont!
-    if (G_UNLIKELY (diff >= max_sample_diff)) {
+    if (src->alignment_threshold > 0
+        && src->alignment_threshold != GST_CLOCK_TIME_NONE
+        && G_UNLIKELY (diff >= max_sample_diff)) {
       if (src->discont_wait > 0) {
         if (src->discont_time == GST_CLOCK_TIME_NONE) {
           src->discont_time = start_time;
@@ -897,6 +899,8 @@ gst_aja_audio_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
     GST_BUFFER_FLAG_SET (*buffer, GST_BUFFER_FLAG_DISCONT);
     src->next_offset = end_offset;
     src->discont_time = GST_CLOCK_TIME_NONE;
+  } else if (src->alignment_threshold == 0) {
+    // Don't align, just pass through timestamps
   } else {
     // No discont, just keep counting
     timestamp =
