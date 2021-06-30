@@ -1,6 +1,7 @@
 /* GStreamer
  * Copyright (C) 2015 PSM <philm@aja.com>
  * Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
+ * Copyright (C) 2021 NVIDIA Corporation.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -35,11 +36,15 @@ typedef enum
     GST_AJA_MODE_RAW_NTSC_8_2398i,
     GST_AJA_MODE_RAW_NTSC_8_24i,
     GST_AJA_MODE_RAW_NTSC_8_5994i,
+    GST_AJA_MODE_RAW_NTSC_8_RGBA_2398i,
+    GST_AJA_MODE_RAW_NTSC_8_RGBA_24i,
+    GST_AJA_MODE_RAW_NTSC_8_RGBA_5994i,
     GST_AJA_MODE_RAW_NTSC_10_2398i,
     GST_AJA_MODE_RAW_NTSC_10_24i,
     GST_AJA_MODE_RAW_NTSC_10_5994i,
     
     GST_AJA_MODE_RAW_PAL_8_50i,
+    GST_AJA_MODE_RAW_PAL_8_RGBA_50i,
     GST_AJA_MODE_RAW_PAL_10_50i,
     
     GST_AJA_MODE_RAW_720_8_2398p,
@@ -47,6 +52,11 @@ typedef enum
     GST_AJA_MODE_RAW_720_8_50p,
     GST_AJA_MODE_RAW_720_8_5994p,
     GST_AJA_MODE_RAW_720_8_60p,
+    GST_AJA_MODE_RAW_720_8_RGBA_2398p,
+    GST_AJA_MODE_RAW_720_8_RGBA_25p,
+    GST_AJA_MODE_RAW_720_8_RGBA_50p,
+    GST_AJA_MODE_RAW_720_8_RGBA_5994p,
+    GST_AJA_MODE_RAW_720_8_RGBA_60p,
     GST_AJA_MODE_RAW_720_10_2398p,
     GST_AJA_MODE_RAW_720_10_25p,
     GST_AJA_MODE_RAW_720_10_50p,
@@ -64,6 +74,18 @@ typedef enum
     GST_AJA_MODE_RAW_1080_8_5994p,
     GST_AJA_MODE_RAW_1080_8_60i,
     GST_AJA_MODE_RAW_1080_8_60p,
+
+    GST_AJA_MODE_RAW_1080_8_RGBA_2398p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_24p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_25p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_2997p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_30p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_50i,
+    GST_AJA_MODE_RAW_1080_8_RGBA_50p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_5994i,
+    GST_AJA_MODE_RAW_1080_8_RGBA_5994p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_60i,
+    GST_AJA_MODE_RAW_1080_8_RGBA_60p,
     
     GST_AJA_MODE_RAW_1080_10_2398p,
     GST_AJA_MODE_RAW_1080_10_24p,
@@ -85,6 +107,15 @@ typedef enum
     GST_AJA_MODE_RAW_UHD_8_50p,
     GST_AJA_MODE_RAW_UHD_8_5994p,
     GST_AJA_MODE_RAW_UHD_8_60p,
+
+    GST_AJA_MODE_RAW_UHD_8_RGBA_2398p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_24p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_25p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_2997p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_30p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_50p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_5994p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_60p,
     
     GST_AJA_MODE_RAW_UHD_10_2398p,
     GST_AJA_MODE_RAW_UHD_10_24p,
@@ -107,6 +138,19 @@ typedef enum
     GST_AJA_MODE_RAW_4K_8_60p,
     GST_AJA_MODE_RAW_4K_8_11988p,
     GST_AJA_MODE_RAW_4K_8_120p,
+    
+    GST_AJA_MODE_RAW_4K_8_RGBA_2398p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_24p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_25p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_2997p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_30p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_4795p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_48p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_50p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_5994p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_60p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_11988p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_120p,
     
     GST_AJA_MODE_RAW_4K_10_2398p,
     GST_AJA_MODE_RAW_4K_10_24p,
@@ -217,6 +261,7 @@ struct _GstAjaMode
     int                     width;
     int                     height;
     int                     bitDepth;
+    gboolean                isRGBA;
     int                     fps_n;
     int                     fps_d;
     gboolean                isInterlaced;

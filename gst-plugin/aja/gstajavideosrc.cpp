@@ -683,6 +683,7 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
   status = src->input->ntv2AV->Init (src->input->mode->videoFormat,
       input_source,
       src->input->mode->bitDepth,
+      src->input->mode->isRGBA,
       src->input->mode->is422,
       false,
       src->sdi_input_mode, timecode_mode, src->output_cc ? true : false,

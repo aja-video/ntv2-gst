@@ -3,6 +3,7 @@
     @brief        Implementation of NTV2Encode class.
     @copyright    Copyright (C) 2015 AJA Video Systems, Inc.  All rights reserved.
                   Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
+                  Copyright (C) 2021 NVIDIA Corporation.  All rights reserved.
 **/
 
 #include <stdio.h>
@@ -172,6 +173,7 @@ AJAStatus
     NTV2GstAV::Init (const NTV2VideoFormat inVideoFormat,
     const NTV2InputSource inInputSource,
     const uint32_t inBitDepth,
+    const bool inIsRGBA,
     const bool inIs422,
     const bool inIsAuto,
     const SDIInputMode inSDIInputMode,
@@ -186,6 +188,7 @@ AJAStatus
 
   mVideoSource = inInputSource;
   mBitDepth = inBitDepth;
+  mIsRGBA = inIsRGBA;
   mIs422 = inIs422;
   mIsAuto = inIsAuto;
   mTimecodeMode = inTimeCode;
@@ -413,7 +416,9 @@ NTV2GstAV::Quit (void)
 AJAStatus NTV2GstAV::SetupVideo (void)
 {
   // Figure out frame buffer format
-  if (mBitDepth == 8)
+  if (mIsRGBA)
+    mPixelFormat = NTV2_FBF_ABGR;
+  else if (mBitDepth == 8)
     mPixelFormat = NTV2_FBF_8BIT_YCBCR;
   else
     mPixelFormat = NTV2_FBF_10BIT_YCBCR;
@@ -717,8 +722,14 @@ AJAStatus NTV2GstAV::SetupVideo (void)
       inputIdentifier = NTV2_Xpt425Mux3AYUV;
   }
 
-  // Add to the mapping to the router for this channel
-  router.AddConnection (fbfInputSelect, inputIdentifier);
+  if (mIsRGBA) {
+    // Route the channel into the CSC for RGB conversion
+    router.AddConnection (NTV2_XptCSC1VidInput, inputIdentifier);
+    router.AddConnection (fbfInputSelect, NTV2_XptCSC1VidRGB);
+  } else {
+    // Add to the mapping to the router for this channel
+    router.AddConnection (fbfInputSelect, inputIdentifier);
+  }
 
   // Disable SDI output from the SDI input being used,
   // but only if the device supports bi-directional SDI,
