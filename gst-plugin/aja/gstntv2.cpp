@@ -21,6 +21,10 @@
 #include "ajabase/system/process.h"
 #include "ajabase/system/systemtime.h"
 
+#if ENABLE_NVMM
+#include "nvbufsurface.h"
+#endif
+
 GST_DEBUG_CATEGORY_STATIC (gst_ntv2_debug);
 #define GST_CAT_DEFAULT gst_ntv2_debug
 
@@ -54,6 +58,7 @@ mInputChannel (inChannel),
 mInputSource (NTV2_INPUTSOURCE_SDI1),
 mVideoFormat (NTV2_MAX_NUM_VIDEO_FORMATS),
 mMultiStream (false),
+mCaps (NULL),
 mAudioSystem (NTV2_AUDIOSYSTEM_1),
 mNumAudioChannels (0),
 mLastFrame (false),
@@ -180,7 +185,9 @@ AJAStatus
     const NTV2TCIndex inTimeCode,
     const bool inCaptureTall,
     const bool inPassthrough,
-    const uint32_t inCaptureCPUCore)
+    const uint32_t inCaptureCPUCore,
+    GstCaps *inCaps,
+    const bool inUseNvmm)
 {
   AJAStatus status (AJA_STATUS_SUCCESS);
 
@@ -196,6 +203,16 @@ AJAStatus
   mPassthrough = inPassthrough;
   mSDIInputMode = inSDIInputMode;
   mCaptureCPUCore = inCaptureCPUCore;
+  mCaps = inCaps;
+
+#if ENABLE_NVMM
+  mUseNvmm = inUseNvmm;
+#else
+  if (inUseNvmm) {
+    GST_ERROR ("NVMM RDMA Not Supported");
+    return AJA_STATUS_FAIL;
+  }
+#endif
 
   // Map input video modes. For quad-link and UHD/4k HDMI we need to map
   // to 4x modes, otherwise keep mode as is
@@ -1070,19 +1087,35 @@ NTV2GstAV::SetupHostBuffers (void)
   mAudioBufferSize = NTV2_AUDIOSIZE_MAX;
 
   mDevice.DMABufferAutoLock(false, true, 0);
-  GstAllocator *video_alloc = gst_aja_allocator_new(&mDevice, mVideoBufferSize, VIDEO_ARRAY_SIZE);
 
   // These video buffers are actually passed out of this class so we need to assign them unique numbers
   // so they can be tracked and also they have a state
-  mVideoBufferPool = gst_aja_buffer_pool_new ();
-  GstStructure *config = gst_buffer_pool_get_config (mVideoBufferPool);
-  gst_buffer_pool_config_set_params (config, NULL, mVideoBufferSize,
-      VIDEO_ARRAY_SIZE, 0);
-  gst_buffer_pool_config_set_allocator (config, video_alloc, NULL);
-  gst_structure_set (config, "is-video", G_TYPE_BOOLEAN, TRUE, NULL);
-  gst_buffer_pool_set_config (mVideoBufferPool, config);
-  gst_buffer_pool_set_active (mVideoBufferPool, TRUE);
-  gst_object_unref (video_alloc);
+  GstStructure *config;
+#if ENABLE_NVMM
+  if (mUseNvmm) {
+    mVideoBufferPool = gst_aja_nvmm_buffer_pool_new ();
+    config = gst_buffer_pool_get_config (mVideoBufferPool);
+    gst_buffer_pool_config_set_params (config, mCaps, mVideoBufferSize,
+        VIDEO_ARRAY_SIZE, 0);
+
+    gst_buffer_pool_set_config (mVideoBufferPool, config);
+    gst_buffer_pool_set_active (mVideoBufferPool, TRUE);
+  } else
+#endif
+  {
+    GstAllocator *video_alloc = gst_aja_allocator_new(&mDevice, mVideoBufferSize, VIDEO_ARRAY_SIZE);
+
+    mVideoBufferPool = gst_aja_buffer_pool_new ();
+    config = gst_buffer_pool_get_config (mVideoBufferPool);
+    gst_buffer_pool_config_set_params (config, NULL, mVideoBufferSize,
+        VIDEO_ARRAY_SIZE, 0);
+    gst_buffer_pool_config_set_allocator (config, video_alloc, NULL);
+    gst_structure_set (config, "is-video", G_TYPE_BOOLEAN, TRUE, NULL);
+
+    gst_buffer_pool_set_config (mVideoBufferPool, config);
+    gst_buffer_pool_set_active (mVideoBufferPool, TRUE);
+    gst_object_unref (video_alloc);
+  }
 
   GstAllocator *audio_alloc = gst_aja_allocator_new(&mDevice, mAudioBufferSize, AUDIO_ARRAY_SIZE);
   mAudioBufferPool = gst_aja_buffer_pool_new ();
@@ -1483,8 +1516,19 @@ NTV2GstAV::ACInputWorker (void)
 
       if (pVideoData->buffer) {
         gst_buffer_map (pVideoData->buffer, &video_map, GST_MAP_READWRITE);
-        pVideoData->pVideoBuffer = (uint32_t *) video_map.data;
-        pVideoData->videoBufferSize = video_map.size;
+#if ENABLE_NVMM
+        if (pVideoData->isNvmm) {
+          NvBufSurface *surf = (NvBufSurface*)video_map.data;
+          pVideoData->pVideoBuffer = (uint32_t *) surf->surfaceList[0].dataPtr;
+          pVideoData->videoBufferSize = surf->surfaceList[0].dataSize;
+          // Lock the buffer for RDMA
+          mDevice.DMABufferLock(pVideoData->pVideoBuffer, pVideoData->videoBufferSize, false, true);
+        } else
+#endif
+        {
+          pVideoData->pVideoBuffer = (uint32_t *) video_map.data;
+          pVideoData->videoBufferSize = video_map.size;
+        }
       }
       mInputTransferStruct.SetVideoBuffer (pVideoData->pVideoBuffer,
           pVideoData->videoBufferSize);
@@ -1501,6 +1545,15 @@ NTV2GstAV::ACInputWorker (void)
 
       // do the transfer from the device into our host AvaDataBuffer...
       mDevice.AutoCirculateTransfer (mInputChannel, mInputTransferStruct);
+
+#if ENABLE_NVMM
+      if (pVideoData->isNvmm) {
+        // Unlock from RDMA
+        mDevice.DMABufferUnlock(pVideoData->pVideoBuffer, pVideoData->videoBufferSize);
+        NvBufSurface *surf = (NvBufSurface*)video_map.data;
+        surf->numFilled = 1;
+      }
+#endif
 
       // get the video data size
       pVideoData->videoDataSize = pVideoData->videoBufferSize;
@@ -1537,8 +1590,10 @@ NTV2GstAV::ACInputWorker (void)
         GST_DEBUG ("offset %" G_GSIZE_FORMAT, offset);
         GST_DEBUG ("videoDataSize %u", pVideoData->videoDataSize);
         gst_buffer_unmap (pVideoData->buffer, &video_map);
-        gst_buffer_resize (pVideoData->buffer, offset,
-            pVideoData->videoDataSize - offset);
+        if (!pVideoData->isNvmm) {
+          gst_buffer_resize (pVideoData->buffer, offset,
+              pVideoData->videoDataSize - offset);
+        }
         pVideoData->pAncillaryData = validVanc ? pVideoData->pVideoBuffer : NULL;
         pVideoData->pVideoBuffer = NULL;
       }

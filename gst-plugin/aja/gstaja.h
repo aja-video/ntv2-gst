@@ -31,6 +31,10 @@
 #include "ntv2enums.h"
 #include "ntv2m31enums.h"
 
+#if ENABLE_NVMM
+#include "gstnvdsbufferpool.h"
+#endif
+
 typedef enum
 {
     GST_AJA_MODE_RAW_NTSC_8_2398i,
@@ -275,7 +279,7 @@ struct _GstAjaMode
 
 const GstAjaMode * gst_aja_get_mode_raw (GstAjaModeRawEnum e);
 
-GstCaps * gst_aja_mode_get_caps_raw (GstAjaModeRawEnum e);
+GstCaps * gst_aja_mode_get_caps_raw (GstAjaModeRawEnum e, gboolean isNvmm);
 GstCaps * gst_aja_mode_get_template_caps_raw (void);
 
 typedef struct _GstAjaOutput GstAjaOutput;
@@ -417,5 +421,36 @@ struct _GstAjaAllocatorClass
 
 GType gst_aja_allocator_get_type (void);
 GstAllocator * gst_aja_allocator_new (CNTV2Card *device, gsize alloc_size, guint num_prealloc);
+
+
+#if ENABLE_NVMM
+
+#define GST_TYPE_AJA_NVMM_BUFFER_POOL \
+    (gst_aja_nvmm_buffer_pool_get_type())
+#define GST_IS_AJA_NVMM_BUFFER_POOL(obj) \
+    (G_TYPE_CHECK_INSTANCE_TYPE((obj), GST_TYPE_AJA_NVMM_BUFFER_POOL))
+#define GST_AJA_NVMM_BUFFER_POOL(obj) \
+    (G_TYPE_CHECK_INSTANCE_CAST((obj), GST_TYPE_AJA_NVMM_BUFFER_POOL, GstAjaNvmmBufferPool))
+#define GST_AJA_NVMM_BUFFER_POOL_CAST(obj) \
+    ((GstAjaNvmmBufferPool*)(obj))
+
+typedef struct _GstAjaNvmmBufferPool GstAjaNvmmBufferPool;
+typedef struct _GstAjaNvmmBufferPoolClass GstAjaNvmmBufferPoolClass;
+
+struct _GstAjaNvmmBufferPool
+{
+    // The NvmmBufferPool extends the NvDsBufferPool in order to allocate NVMM buffers.
+    GstNvDsBufferPool nvds_pool;
+};
+
+struct _GstAjaNvmmBufferPoolClass
+{
+    GstBufferPoolClass parent_class;
+};
+
+GType gst_aja_nvmm_buffer_pool_get_type (void);
+GstBufferPool * gst_aja_nvmm_buffer_pool_new (void);
+
+#endif // ENABLE_NVMM
 
 #endif

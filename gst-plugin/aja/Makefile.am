@@ -15,6 +15,13 @@ libgstaja_la_CPPFLAGS = \
 	-I$(GST_NTV2)/ajalibraries/ajabase \
 	-I$(GST_NTV2)/ajalibraries
 
+if ENABLE_NVMM
+libgstaja_la_CPPFLAGS += \
+	-DENABLE_NVMM \
+	-I$(GST_DEEPSTREAM)/sources/includes \
+	-I$(GST_CUDA)/include
+endif
+
 libgstaja_la_LIBADD = \
 	-L$(GST_NTV2)/lib \
 	$(GST_PLUGINS_BASE_LIBS) \
@@ -26,6 +33,13 @@ libgstaja_la_LIBADD = \
 	$(GST_BASE_LIBS) \
 	$(GST_LIBS) \
 	$(LIBM)
+
+if ENABLE_NVMM
+libgstaja_la_LIBADD += \
+	-L$(GST_DEEPSTREAM)/lib \
+	-lnvdsbufferpool \
+	-lcuda
+endif
 
 libgstaja_la_LDFLAGS = -std=c++11 $(GST_PLUGIN_LDFLAGS)
 libgstaja_la_LIBTOOLFLAGS = $(GST_PLUGIN_LIBTOOLFLAGS)

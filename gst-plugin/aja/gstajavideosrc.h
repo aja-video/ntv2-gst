@@ -1,6 +1,7 @@
 /* GStreamer
  * Copyright (C) 2015 PSM <philm@aja.com>
  * Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
+ * Copyright (C) 2021 NVIDIA Corporation.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -75,6 +76,7 @@ struct _GstAjaVideoSrc
     gboolean                    output_cc;
     gint			last_cc_vbi_line;
     guint                       capture_cpu_core;
+    gboolean                    use_nvmm;
 
     guint skipped_last;
     guint64 skipped_overall;

@@ -33,6 +33,11 @@
 
 #include "ajabase/system/memory.h"
 
+#if ENABLE_NVMM
+#include "nvbufsurface.h"
+#include "cuda.h"
+#endif
+
 GST_DEBUG_CATEGORY_STATIC (gst_aja_debug);
 #define GST_CAT_DEFAULT gst_aja_debug
 
@@ -512,12 +517,18 @@ gst_aja_mode_get_structure_raw (GstAjaModeRawEnum e)
 }
 
 GstCaps *
-gst_aja_mode_get_caps_raw (GstAjaModeRawEnum e)
+gst_aja_mode_get_caps_raw (GstAjaModeRawEnum e, gboolean isNvmm)
 {
   GstCaps *caps;
+  GstCapsFeatures *features;
 
   caps = gst_caps_new_empty ();
   gst_caps_append_structure (caps, gst_aja_mode_get_structure_raw (e));
+
+  if (isNvmm) {
+    features = gst_caps_features_new ("memory:NVMM", NULL);
+    gst_caps_set_features(caps, 0, features);
+  }
 
   return caps;
 }
@@ -525,15 +536,30 @@ gst_aja_mode_get_caps_raw (GstAjaModeRawEnum e)
 GstCaps *
 gst_aja_mode_get_template_caps_raw (void)
 {
-  int i;
+  int i, numCaps = 0;
   GstCaps *caps;
   GstStructure *s;
+  GstCapsFeatures *features;
 
   caps = gst_caps_new_empty ();
   for (i = 1; i < (int) G_N_ELEMENTS (modesRaw); i++) {
     s = gst_aja_mode_get_structure_raw ((GstAjaModeRawEnum) i);
     gst_structure_remove_field (s, "colorimetry");
     gst_caps_append_structure (caps, s);
+    numCaps++;
+
+#if ENABLE_NVMM
+    // Duplicate RGBA formats with NVMM support.
+    const GstAjaMode *mode = &modesRaw[i];
+    if (mode->isRGBA) {
+      s = gst_aja_mode_get_structure_raw ((GstAjaModeRawEnum) i);
+      gst_structure_remove_field (s, "colorimetry");
+      gst_caps_append_structure (caps, s);
+      features = gst_caps_features_new ("memory:NVMM", NULL);
+      gst_caps_set_features(caps, numCaps, features);
+      numCaps++;
+    }
+#endif
   }
 
   return caps;
@@ -780,6 +806,7 @@ gst_aja_buffer_pool_alloc_buffer (GstBufferPool * pool, GstBuffer ** buffer,
     videoBuff->pVideoBuffer = NULL;
     videoBuff->videoBufferSize = 0;
     videoBuff->videoDataSize = 0;
+    videoBuff->isNvmm = false;
 
     gst_mini_object_set_qdata (GST_MINI_OBJECT_CAST (*buffer),
         video_buffer_quark, videoBuff, (GDestroyNotify) aja_video_buff_free);
@@ -1090,6 +1117,95 @@ gst_aja_allocator_new (CNTV2Card *device, gsize alloc_size, guint num_prealloc)
 
   return GST_ALLOCATOR (alloc);
 }
+
+#if ENABLE_NVMM
+
+G_DEFINE_TYPE (GstAjaNvmmBufferPool, gst_aja_nvmm_buffer_pool, GST_TYPE_NVDS_BUFFER_POOL);
+
+static gboolean
+gst_aja_nvmm_buffer_pool_set_config (GstBufferPool * pool, GstStructure * config)
+{
+  // Have the NvDsBufferPool allocate CUDA device memory
+  gst_structure_set (config, "memtype", G_TYPE_UINT, NVBUF_MEM_CUDA_DEVICE, NULL);
+
+  if (!GST_BUFFER_POOL_CLASS (gst_aja_nvmm_buffer_pool_parent_class)->set_config (pool, config))
+    return FALSE;
+
+  return TRUE;
+}
+
+static GstFlowReturn
+gst_aja_nvmm_buffer_pool_alloc_buffer (GstBufferPool * pool, GstBuffer ** buffer,
+    GstBufferPoolAcquireParams * params)
+{
+  GstFlowReturn ret =
+      GST_BUFFER_POOL_CLASS (gst_aja_nvmm_buffer_pool_parent_class)->alloc_buffer
+      (pool, buffer, params);
+  if (ret != GST_FLOW_OK)
+    return ret;
+
+  // Set the SYNC_MEMOPS flag to ensure synchronous memory operations for RDMA
+  GstMapInfo map;
+  gst_buffer_map (*buffer, &map, GST_MAP_READWRITE);
+  NvBufSurface *surf = (NvBufSurface*)map.data;
+  unsigned int syncFlag = 1;
+  cuPointerSetAttribute(&syncFlag, CU_POINTER_ATTRIBUTE_SYNC_MEMOPS,
+      (CUdeviceptr)surf->surfaceList[0].dataPtr);
+  gst_buffer_unmap (*buffer, &map);
+
+  AjaVideoBuff *videoBuff = new AjaVideoBuff;
+
+  videoBuff->buffer = *buffer;
+  videoBuff->pVideoBuffer = NULL;
+  videoBuff->videoBufferSize = 0;
+  videoBuff->videoDataSize = 0;
+  videoBuff->isNvmm = true;
+
+  gst_mini_object_set_qdata (GST_MINI_OBJECT_CAST (*buffer),
+      video_buffer_quark, videoBuff, (GDestroyNotify) aja_video_buff_free);
+
+  return ret;
+}
+
+static void
+gst_aja_nvmm_buffer_pool_release_buffer (GstBufferPool * pool, GstBuffer * buffer)
+{
+  // Free if something removed our qdata
+  if (!gst_mini_object_get_qdata (GST_MINI_OBJECT_CAST (buffer),
+          video_buffer_quark))
+    GST_BUFFER_FLAG_SET (buffer, GST_BUFFER_FLAG_TAG_MEMORY);
+
+  GST_BUFFER_POOL_CLASS (gst_aja_nvmm_buffer_pool_parent_class)->release_buffer
+      (pool, buffer);
+}
+
+static void
+gst_aja_nvmm_buffer_pool_class_init (GstAjaNvmmBufferPoolClass * klass)
+{
+  GstBufferPoolClass *buffer_pool_class = (GstBufferPoolClass *) klass;
+
+  buffer_pool_class->set_config = gst_aja_nvmm_buffer_pool_set_config;
+  buffer_pool_class->alloc_buffer = gst_aja_nvmm_buffer_pool_alloc_buffer;
+  buffer_pool_class->release_buffer = gst_aja_nvmm_buffer_pool_release_buffer;
+
+  video_buffer_quark = g_quark_from_static_string ("AjaVideoBuff");
+}
+
+static void
+gst_aja_nvmm_buffer_pool_init (GstAjaNvmmBufferPool * buffer_pool)
+{
+}
+
+GstBufferPool *
+gst_aja_nvmm_buffer_pool_new (void)
+{
+  GstAjaNvmmBufferPool *self =
+      GST_AJA_NVMM_BUFFER_POOL (g_object_new (GST_TYPE_AJA_NVMM_BUFFER_POOL, NULL));
+
+  return GST_BUFFER_POOL_CAST (self);
+}
+
+#endif // ENABLE_NVMM
 
 #ifndef VERSION
 #define VERSION "0.0.1"

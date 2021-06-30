@@ -50,6 +50,8 @@ typedef struct
 {
     GstBuffer *     buffer;                 /// If buffer != NULL, it actually owns the AjaVideoBuff and the following 3 fields are NULL
 
+    bool            isNvmm;                 /// True if this is an NVIDIA NVMM GPU Buffer used with RDMA
+
     uint32_t *      pVideoBuffer;           /// Pointer to host video buffer
     uint32_t        videoBufferSize;        /// Size of host video buffer (bytes)
     uint32_t        videoDataSize;          /// Size of video data (bytes)
@@ -150,7 +152,9 @@ class NTV2GstAV
                                 const NTV2TCIndex               inTimeCode      = NTV2_TCINDEX_SDI1,
 				const bool                      inCaptureTall   = false,
                                 const bool                      inPassthrough   = false,
-                                const uint32_t                  inCaptureCPUCore = -1);
+                                const uint32_t                  inCaptureCPUCore = -1,
+                                GstCaps                        *inCaps          = NULL,
+                                const bool                      inUseNvmm       = false);
 
         virtual AJAStatus InitAudio (const NTV2AudioSource inAudioSource, uint32_t *numAudioChannels);
 
@@ -290,6 +294,8 @@ class NTV2GstAV
         uint32_t                    mCaptureCPUCore;
         NTV2InputSource             mVideoSource;
         bool                        mPassthrough;
+        GstCaps *                   mCaps;                  /// GStreamer format caps, used by buffer pools/allocators
+        bool                        mUseNvmm;               /// Outputs NVMM buffers via RDMA, otherwise outputs regular sysmem buffers
         NTV2AudioSystem             mAudioSystem;            ///    The audio system I'm using
         NTV2AudioSource             mAudioSource;
         uint32_t                    mNumAudioChannels;
