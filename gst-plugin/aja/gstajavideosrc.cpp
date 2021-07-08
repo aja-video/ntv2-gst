@@ -1,6 +1,7 @@
 /* GStreamer
  * Copyright (C) 2015 PSM <philm@aja.com>
  * Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
+ * Copyright (C) 2021 NVIDIA Corporation.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -684,7 +685,7 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
       src->input->mode->bitDepth,
       src->input->mode->is422,
       false,
-      src->sdi_input_mode, timecode_mode, false, src->output_cc ? true : false,
+      src->sdi_input_mode, timecode_mode, src->output_cc ? true : false,
       src->passthrough ? true : false, src->capture_cpu_core);
   if (!AJA_SUCCESS (status)) {
     GST_ERROR_OBJECT (src, "Failed to initialize input");
