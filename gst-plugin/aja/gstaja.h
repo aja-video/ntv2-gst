@@ -1,6 +1,7 @@
 /* GStreamer
  * Copyright (C) 2015 PSM <philm@aja.com>
  * Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
+ * Copyright (C) 2021 NVIDIA Corporation.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -30,16 +31,24 @@
 #include "ntv2enums.h"
 #include "ntv2m31enums.h"
 
+#if ENABLE_NVMM
+#include "gstnvdsbufferpool.h"
+#endif
+
 typedef enum
 {
     GST_AJA_MODE_RAW_NTSC_8_2398i,
     GST_AJA_MODE_RAW_NTSC_8_24i,
     GST_AJA_MODE_RAW_NTSC_8_5994i,
+    GST_AJA_MODE_RAW_NTSC_8_RGBA_2398i,
+    GST_AJA_MODE_RAW_NTSC_8_RGBA_24i,
+    GST_AJA_MODE_RAW_NTSC_8_RGBA_5994i,
     GST_AJA_MODE_RAW_NTSC_10_2398i,
     GST_AJA_MODE_RAW_NTSC_10_24i,
     GST_AJA_MODE_RAW_NTSC_10_5994i,
     
     GST_AJA_MODE_RAW_PAL_8_50i,
+    GST_AJA_MODE_RAW_PAL_8_RGBA_50i,
     GST_AJA_MODE_RAW_PAL_10_50i,
     
     GST_AJA_MODE_RAW_720_8_2398p,
@@ -47,6 +56,11 @@ typedef enum
     GST_AJA_MODE_RAW_720_8_50p,
     GST_AJA_MODE_RAW_720_8_5994p,
     GST_AJA_MODE_RAW_720_8_60p,
+    GST_AJA_MODE_RAW_720_8_RGBA_2398p,
+    GST_AJA_MODE_RAW_720_8_RGBA_25p,
+    GST_AJA_MODE_RAW_720_8_RGBA_50p,
+    GST_AJA_MODE_RAW_720_8_RGBA_5994p,
+    GST_AJA_MODE_RAW_720_8_RGBA_60p,
     GST_AJA_MODE_RAW_720_10_2398p,
     GST_AJA_MODE_RAW_720_10_25p,
     GST_AJA_MODE_RAW_720_10_50p,
@@ -64,6 +78,18 @@ typedef enum
     GST_AJA_MODE_RAW_1080_8_5994p,
     GST_AJA_MODE_RAW_1080_8_60i,
     GST_AJA_MODE_RAW_1080_8_60p,
+
+    GST_AJA_MODE_RAW_1080_8_RGBA_2398p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_24p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_25p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_2997p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_30p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_50i,
+    GST_AJA_MODE_RAW_1080_8_RGBA_50p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_5994i,
+    GST_AJA_MODE_RAW_1080_8_RGBA_5994p,
+    GST_AJA_MODE_RAW_1080_8_RGBA_60i,
+    GST_AJA_MODE_RAW_1080_8_RGBA_60p,
     
     GST_AJA_MODE_RAW_1080_10_2398p,
     GST_AJA_MODE_RAW_1080_10_24p,
@@ -85,6 +111,15 @@ typedef enum
     GST_AJA_MODE_RAW_UHD_8_50p,
     GST_AJA_MODE_RAW_UHD_8_5994p,
     GST_AJA_MODE_RAW_UHD_8_60p,
+
+    GST_AJA_MODE_RAW_UHD_8_RGBA_2398p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_24p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_25p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_2997p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_30p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_50p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_5994p,
+    GST_AJA_MODE_RAW_UHD_8_RGBA_60p,
     
     GST_AJA_MODE_RAW_UHD_10_2398p,
     GST_AJA_MODE_RAW_UHD_10_24p,
@@ -107,6 +142,19 @@ typedef enum
     GST_AJA_MODE_RAW_4K_8_60p,
     GST_AJA_MODE_RAW_4K_8_11988p,
     GST_AJA_MODE_RAW_4K_8_120p,
+    
+    GST_AJA_MODE_RAW_4K_8_RGBA_2398p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_24p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_25p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_2997p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_30p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_4795p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_48p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_50p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_5994p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_60p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_11988p,
+    GST_AJA_MODE_RAW_4K_8_RGBA_120p,
     
     GST_AJA_MODE_RAW_4K_10_2398p,
     GST_AJA_MODE_RAW_4K_10_24p,
@@ -217,6 +265,7 @@ struct _GstAjaMode
     int                     width;
     int                     height;
     int                     bitDepth;
+    gboolean                isRGBA;
     int                     fps_n;
     int                     fps_d;
     gboolean                isInterlaced;
@@ -230,7 +279,7 @@ struct _GstAjaMode
 
 const GstAjaMode * gst_aja_get_mode_raw (GstAjaModeRawEnum e);
 
-GstCaps * gst_aja_mode_get_caps_raw (GstAjaModeRawEnum e);
+GstCaps * gst_aja_mode_get_caps_raw (GstAjaModeRawEnum e, gboolean isNvmm);
 GstCaps * gst_aja_mode_get_template_caps_raw (void);
 
 typedef struct _GstAjaOutput GstAjaOutput;
@@ -372,5 +421,36 @@ struct _GstAjaAllocatorClass
 
 GType gst_aja_allocator_get_type (void);
 GstAllocator * gst_aja_allocator_new (CNTV2Card *device, gsize alloc_size, guint num_prealloc);
+
+
+#if ENABLE_NVMM
+
+#define GST_TYPE_AJA_NVMM_BUFFER_POOL \
+    (gst_aja_nvmm_buffer_pool_get_type())
+#define GST_IS_AJA_NVMM_BUFFER_POOL(obj) \
+    (G_TYPE_CHECK_INSTANCE_TYPE((obj), GST_TYPE_AJA_NVMM_BUFFER_POOL))
+#define GST_AJA_NVMM_BUFFER_POOL(obj) \
+    (G_TYPE_CHECK_INSTANCE_CAST((obj), GST_TYPE_AJA_NVMM_BUFFER_POOL, GstAjaNvmmBufferPool))
+#define GST_AJA_NVMM_BUFFER_POOL_CAST(obj) \
+    ((GstAjaNvmmBufferPool*)(obj))
+
+typedef struct _GstAjaNvmmBufferPool GstAjaNvmmBufferPool;
+typedef struct _GstAjaNvmmBufferPoolClass GstAjaNvmmBufferPoolClass;
+
+struct _GstAjaNvmmBufferPool
+{
+    // The NvmmBufferPool extends the NvDsBufferPool in order to allocate NVMM buffers.
+    GstNvDsBufferPool nvds_pool;
+};
+
+struct _GstAjaNvmmBufferPoolClass
+{
+    GstBufferPoolClass parent_class;
+};
+
+GType gst_aja_nvmm_buffer_pool_get_type (void);
+GstBufferPool * gst_aja_nvmm_buffer_pool_new (void);
+
+#endif // ENABLE_NVMM
 
 #endif

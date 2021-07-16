@@ -84,6 +84,14 @@ dnl set proper LDFLAGS for plugins
 GST_PLUGIN_LDFLAGS='-module -avoid-version -export-symbols-regex [_]*\(gst_\|Gst\|GST_\).*'
 AC_SUBST(GST_PLUGIN_LDFLAGS)
 
+dnl check for GST_DEEPSTREAM and GST_CUDA to enable NVMM (NvBuffer) RDMA support
+AM_CONDITIONAL([ENABLE_NVMM], [test ! -z "$GST_DEEPSTREAM"])
+if [test ! -z "$GST_DEEPSTREAM"] && [test -z "$GST_CUDA"]; then
+  AC_MSG_ERROR([
+      GST_DEEPSTREAM and GST_CUDA must both be set to enable NVMM RDMA support.
+  ])
+fi
+
 AC_CONFIG_FILES([Makefile aja/Makefile])
 AC_OUTPUT
 

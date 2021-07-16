@@ -3,6 +3,7 @@
     @brief        Declares the NTV2Capture class.
     @copyright    Copyright (C) 2012-2015 AJA Video Systems, Inc.  All rights reserved.
                   Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
+                  Copyright (C) 2021 NVIDIA Corporation.  All rights reserved.
 **/
 
 
@@ -48,6 +49,8 @@ typedef enum {
 typedef struct
 {
     GstBuffer *     buffer;                 /// If buffer != NULL, it actually owns the AjaVideoBuff and the following 3 fields are NULL
+
+    bool            isNvmm;                 /// True if this is an NVIDIA NVMM GPU Buffer used with RDMA
 
     uint32_t *      pVideoBuffer;           /// Pointer to host video buffer
     uint32_t        videoBufferSize;        /// Size of host video buffer (bytes)
@@ -142,13 +145,16 @@ class NTV2GstAV
         virtual AJAStatus Init (const NTV2VideoFormat           inVideoFormat   = NTV2_FORMAT_525_5994,
                                 const NTV2InputSource           inInputSource   = NTV2_INPUTSOURCE_SDI1,
                                 const uint32_t                  inBitDepth      = 8,
+                                const bool                      inIsRGBA        = false,
                                 const bool                      inIs422         = false,
                                 const bool                      inIsAuto        = false,
                                 const SDIInputMode              inSDIInputMode  = SDI_INPUT_MODE_SINGLE_LINK,
                                 const NTV2TCIndex               inTimeCode      = NTV2_TCINDEX_SDI1,
 				const bool                      inCaptureTall   = false,
                                 const bool                      inPassthrough   = false,
-                                const uint32_t                  inCaptureCPUCore = -1);
+                                const uint32_t                  inCaptureCPUCore = -1,
+                                GstCaps                        *inCaps          = NULL,
+                                const bool                      inUseNvmm       = false);
 
         virtual AJAStatus InitAudio (const NTV2AudioSource inAudioSource, uint32_t *numAudioChannels);
 
@@ -277,6 +283,7 @@ class NTV2GstAV
         NTV2VideoFormat                mVideoFormat;            ///    Video format
         NTV2FrameBufferFormat        mPixelFormat;            ///    Pixel format
         uint32_t                    mBitDepth;              /// Bit depth of frame store (8 or 10)
+        bool                        mIsRGBA;                /// Is RGBA, otherwise it is YUV
         bool                        mIs422;                    /// Is 422 video otherwise it is 420
         bool                        mIsAuto;                /// Is auto mode (should only be used when called from the audiosrc to set device automatically based on input)
         SDIInputMode                mSDIInputMode;           /// SDI input mode
@@ -287,6 +294,8 @@ class NTV2GstAV
         uint32_t                    mCaptureCPUCore;
         NTV2InputSource             mVideoSource;
         bool                        mPassthrough;
+        GstCaps *                   mCaps;                  /// GStreamer format caps, used by buffer pools/allocators
+        bool                        mUseNvmm;               /// Outputs NVMM buffers via RDMA, otherwise outputs regular sysmem buffers
         NTV2AudioSystem             mAudioSystem;            ///    The audio system I'm using
         NTV2AudioSource             mAudioSource;
         uint32_t                    mNumAudioChannels;

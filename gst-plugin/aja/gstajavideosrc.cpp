@@ -1,6 +1,7 @@
 /* GStreamer
  * Copyright (C) 2015 PSM <philm@aja.com>
  * Copyright (C) 2017 Sebastian Dröge <sebastian@centricular.com>
+ * Copyright (C) 2021 NVIDIA Corporation.  All rights reserved.
  *
  * This library is free software; you can redistribute it and/or
  * modify it under the terms of the GNU Library General Public
@@ -61,6 +62,7 @@ enum
   PROP_OUTPUT_CC,
   PROP_SIGNAL,
   PROP_CAPTURE_CPU_CORE,
+  PROP_NVMM
 };
 
 typedef enum {
@@ -236,6 +238,13 @@ gst_aja_video_src_class_init (GstAjaVideoSrcClass * klass)
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               G_PARAM_CONSTRUCT)));
 
+#if ENABLE_NVMM
+  g_object_class_install_property (gobject_class, PROP_NVMM,
+      g_param_spec_boolean ("nvmm", "Use NVMM (NVIDIA GPU) Buffers",
+          "True if output frames should be output to NVMM (NVIDIA GPU) buffers via RDMA",
+          FALSE, (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS)));
+#endif
+
   templ_caps = gst_aja_mode_get_template_caps_raw ();
   gst_element_class_add_pad_template (element_class,
       gst_pad_template_new ("src", GST_PAD_SRC, GST_PAD_ALWAYS, templ_caps));
@@ -382,6 +391,12 @@ gst_aja_video_src_set_property (GObject * object, guint property_id,
       src->capture_cpu_core = g_value_get_uint (value);
       break;
 
+#if ENABLE_NVMM
+    case PROP_NVMM:
+      src->use_nvmm = g_value_get_boolean (value);
+      break;
+#endif
+
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
       break;
@@ -447,6 +462,12 @@ gst_aja_video_src_get_property (GObject * object, guint property_id,
     case PROP_CAPTURE_CPU_CORE:
       g_value_set_uint (value, src->capture_cpu_core);
       break;
+
+#if ENABLE_NVMM
+    case PROP_NVMM:
+      g_value_set_boolean (value, src->use_nvmm);
+      break;
+#endif
 
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, property_id, pspec);
@@ -517,7 +538,7 @@ gst_aja_video_src_get_caps (GstBaseSrc * bsrc, GstCaps * filter)
   GstAjaVideoSrc *src = GST_AJA_VIDEO_SRC (bsrc);
   GstCaps *caps;
 
-  caps = gst_aja_mode_get_caps_raw (src->modeEnum);
+  caps = gst_aja_mode_get_caps_raw (src->modeEnum, src->use_nvmm);
   if (filter) {
     GstCaps *tmp = gst_caps_intersect_full (filter, caps, GST_CAPS_INTERSECT_FIRST);
     gst_caps_unref (caps);
@@ -608,6 +629,7 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
 {
   AJAStatus status;
   const GstAjaMode *mode;
+  GstCaps *caps;
   NTV2InputSource input_source;
   NTV2TCIndex timecode_mode;
 
@@ -623,6 +645,9 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
 
   mode = gst_aja_get_mode_raw (src->modeEnum);
   g_assert (mode != NULL);
+
+  caps = gst_aja_mode_get_caps_raw(src->modeEnum, src->use_nvmm);
+  g_assert (caps != NULL);
 
   g_mutex_lock (&src->input->lock);
   src->input->mode = mode;
@@ -682,10 +707,12 @@ gst_aja_video_src_open (GstAjaVideoSrc * src)
   status = src->input->ntv2AV->Init (src->input->mode->videoFormat,
       input_source,
       src->input->mode->bitDepth,
+      src->input->mode->isRGBA,
       src->input->mode->is422,
       false,
-      src->sdi_input_mode, timecode_mode, false, src->output_cc ? true : false,
-      src->passthrough ? true : false, src->capture_cpu_core);
+      src->sdi_input_mode, timecode_mode, src->output_cc ? true : false,
+      src->passthrough ? true : false, src->capture_cpu_core,
+      caps, src->use_nvmm);
   if (!AJA_SUCCESS (status)) {
     GST_ERROR_OBJECT (src, "Failed to initialize input");
     g_mutex_unlock (&src->input->lock);
@@ -1260,6 +1287,7 @@ gst_aja_video_src_create (GstPushSrc * bsrc, GstBuffer ** buffer)
 
   AjaCaptureVideoFrame f;
   GstCaps *caps;
+  GstCapsFeatures *features;
   GstClockTime capture_time, stream_time;
   gboolean timecode_valid;
   guint32 timecode_high, timecode_low;
@@ -1320,7 +1348,7 @@ retry:
     src->colorimetry = f.video_buff->colorimetry;
     src->fullRange = f.video_buff->fullRange;
     g_mutex_unlock (&src->lock);
-    caps = gst_aja_mode_get_caps_raw (f.mode);
+    caps = gst_aja_mode_get_caps_raw (f.mode, f.video_buff->isNvmm);
     gst_video_info_from_caps (&src->info, caps);
     // TODO: Work with videoinfo instead of caps
     gst_caps_unref (caps);
@@ -1355,6 +1383,10 @@ retry:
     }
     src->info.colorimetry.range = src->fullRange ? GST_VIDEO_COLOR_RANGE_0_255 : GST_VIDEO_COLOR_RANGE_16_235;
     caps = gst_video_info_to_caps (&src->info);
+    if (f.video_buff->isNvmm) {
+      features = gst_caps_features_new ("memory:NVMM", NULL);
+      gst_caps_set_features(caps, 0, features);
+    }
     gst_base_src_set_caps (GST_BASE_SRC_CAST (bsrc), caps);
     gst_element_post_message (GST_ELEMENT_CAST (src),
         gst_message_new_latency (GST_OBJECT_CAST (src)));
