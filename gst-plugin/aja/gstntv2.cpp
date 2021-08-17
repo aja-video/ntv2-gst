@@ -633,6 +633,10 @@ AJAStatus NTV2GstAV::SetupVideo (void)
           iter->second == NTV2_Xpt425Mux1BYUV ||
           iter->second == NTV2_Xpt425Mux2AYUV ||
           iter->second == NTV2_Xpt425Mux2BYUV ||
+          iter->second == NTV2_Xpt425Mux1ARGB ||
+          iter->second == NTV2_Xpt425Mux1BRGB ||
+          iter->second == NTV2_Xpt425Mux2ARGB ||
+          iter->second == NTV2_Xpt425Mux2BRGB ||
           iter->first == NTV2_Xpt425Mux1AInput ||
           iter->first == NTV2_Xpt425Mux1BInput ||
           iter->first == NTV2_Xpt425Mux2AInput ||
@@ -640,7 +644,15 @@ AJAStatus NTV2GstAV::SetupVideo (void)
           iter->second == NTV2_XptHDMIIn1 ||
           iter->second == NTV2_XptHDMIIn1Q2 ||
           iter->second == NTV2_XptHDMIIn1Q3 ||
-          iter->second == NTV2_XptHDMIIn1Q4)
+          iter->second == NTV2_XptHDMIIn1Q4 ||
+          iter->first == NTV2_XptCSC1VidInput ||
+          iter->first == NTV2_XptCSC2VidInput ||
+          iter->first == NTV2_XptCSC3VidInput ||
+          iter->first == NTV2_XptCSC4VidInput ||
+          iter->second == NTV2_XptCSC1VidRGB ||
+          iter->second == NTV2_XptCSC2VidRGB ||
+          iter->second == NTV2_XptCSC3VidRGB ||
+          iter->second == NTV2_XptCSC4VidRGB)
         router.RemoveConnection(iter->first, iter->second);
     }
   } else if (mQuad && mInputChannel == NTV2_CHANNEL1) {
@@ -729,9 +741,15 @@ AJAStatus NTV2GstAV::SetupVideo (void)
     }
   }
 
+  // Route the channel through the CSC for RGB conversion
+  if (mIsRGBA) {
+    router.AddConnection (NTV2_XptCSC1VidInput, inputIdentifier);
+    inputIdentifier = NTV2_XptCSC1VidRGB;
+  }
+
   // Special-case for UHD HDMI and SDI TSI
   if (mQuad && mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
-    inputIdentifier = NTV2_Xpt425Mux1AYUV;
+    inputIdentifier = mIsRGBA ? NTV2_Xpt425Mux1ARGB : NTV2_Xpt425Mux1AYUV;
   } else if (mQuad && mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI && mVideoFormat < NTV2_FORMAT_FIRST_UHD2_DEF_FORMAT) {
     if (mInputChannel == NTV2_CHANNEL1)
       inputIdentifier = NTV2_Xpt425Mux1AYUV;
@@ -739,14 +757,8 @@ AJAStatus NTV2GstAV::SetupVideo (void)
       inputIdentifier = NTV2_Xpt425Mux3AYUV;
   }
 
-  if (mIsRGBA) {
-    // Route the channel into the CSC for RGB conversion
-    router.AddConnection (NTV2_XptCSC1VidInput, inputIdentifier);
-    router.AddConnection (fbfInputSelect, NTV2_XptCSC1VidRGB);
-  } else {
-    // Add to the mapping to the router for this channel
-    router.AddConnection (fbfInputSelect, inputIdentifier);
-  }
+  // Add to the mapping to the router for this channel
+  router.AddConnection (fbfInputSelect, inputIdentifier);
 
   // Disable SDI output from the SDI input being used,
   // but only if the device supports bi-directional SDI,
@@ -792,14 +804,29 @@ AJAStatus NTV2GstAV::SetupVideo (void)
   // Enable UHD/4k quad mode
   if (mQuad) {
     if (mVideoSource == NTV2_INPUTSOURCE_HDMI1) {
-        router.AddConnection(NTV2_XptFrameBuffer1BInput, NTV2_Xpt425Mux1BYUV);
-        router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_Xpt425Mux2AYUV);
-        router.AddConnection(NTV2_XptFrameBuffer2BInput, NTV2_Xpt425Mux2BYUV);
+        if (mIsRGBA) {
+          router.AddConnection(NTV2_XptFrameBuffer1BInput, NTV2_Xpt425Mux1BRGB);
+          router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_Xpt425Mux2ARGB);
+          router.AddConnection(NTV2_XptFrameBuffer2BInput, NTV2_Xpt425Mux2BRGB);
 
-        router.AddConnection(NTV2_Xpt425Mux1AInput, NTV2_XptHDMIIn1);
-        router.AddConnection(NTV2_Xpt425Mux1BInput, NTV2_XptHDMIIn1Q2);
-        router.AddConnection(NTV2_Xpt425Mux2AInput, NTV2_XptHDMIIn1Q3);
-        router.AddConnection(NTV2_Xpt425Mux2BInput, NTV2_XptHDMIIn1Q4);
+          router.AddConnection(NTV2_Xpt425Mux1AInput, NTV2_XptCSC1VidRGB);
+          router.AddConnection(NTV2_Xpt425Mux1BInput, NTV2_XptCSC2VidRGB);
+          router.AddConnection(NTV2_Xpt425Mux2AInput, NTV2_XptCSC3VidRGB);
+          router.AddConnection(NTV2_Xpt425Mux2BInput, NTV2_XptCSC4VidRGB);
+
+          router.AddConnection(NTV2_XptCSC2VidInput, NTV2_XptHDMIIn1Q2);
+          router.AddConnection(NTV2_XptCSC3VidInput, NTV2_XptHDMIIn1Q3);
+          router.AddConnection(NTV2_XptCSC4VidInput, NTV2_XptHDMIIn1Q4);
+        } else {
+          router.AddConnection(NTV2_XptFrameBuffer1BInput, NTV2_Xpt425Mux1BYUV);
+          router.AddConnection(NTV2_XptFrameBuffer2Input, NTV2_Xpt425Mux2AYUV);
+          router.AddConnection(NTV2_XptFrameBuffer2BInput, NTV2_Xpt425Mux2BYUV);
+
+          router.AddConnection(NTV2_Xpt425Mux1AInput, NTV2_XptHDMIIn1);
+          router.AddConnection(NTV2_Xpt425Mux1BInput, NTV2_XptHDMIIn1Q2);
+          router.AddConnection(NTV2_Xpt425Mux2AInput, NTV2_XptHDMIIn1Q3);
+          router.AddConnection(NTV2_Xpt425Mux2BInput, NTV2_XptHDMIIn1Q4);
+        }
     } else if (mSDIInputMode == SDI_INPUT_MODE_QUAD_LINK_TSI && NTV2_IS_QUAD_QUAD_HFR_VIDEO_FORMAT(mVideoFormat)) {
       if (mInputChannel == NTV2_CHANNEL1) {
         router.AddConnection(NTV2_XptFrameBuffer1DS2Input, NTV2_XptSDIIn2);
