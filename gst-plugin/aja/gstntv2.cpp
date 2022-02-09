@@ -508,6 +508,9 @@ AJAStatus NTV2GstAV::SetupVideo (void)
 
   // Select input channel based on mode
   NTV2CrosspointID inputIdentifier = NTV2_XptSDIIn1;
+  NTV2InputCrosspointID cscInput = NTV2_XptCSC1VidInput;
+  NTV2CrosspointID cscOutput = NTV2_XptCSC1VidRGB;
+  bool inputRGB = false;
   switch (mVideoSource) {
     case NTV2_INPUTSOURCE_SDI1:
       // Select correct values based on channel
@@ -516,34 +519,50 @@ AJAStatus NTV2GstAV::SetupVideo (void)
          case NTV2_CHANNEL1:
             inputIdentifier = NTV2_XptSDIIn1;
             mInputSource    = NTV2_INPUTSOURCE_SDI1;
+            cscInput = NTV2_XptCSC1VidInput;
+            cscOutput = mIsRGBA? NTV2_XptCSC1VidRGB : NTV2_XptCSC1VidYUV;
             break;
          case NTV2_CHANNEL2:
             inputIdentifier = NTV2_XptSDIIn2;
             mInputSource    = NTV2_INPUTSOURCE_SDI2;
+            cscInput = NTV2_XptCSC2VidInput;
+            cscOutput = mIsRGBA? NTV2_XptCSC2VidRGB : NTV2_XptCSC2VidYUV;
             break;
          case NTV2_CHANNEL3:
             inputIdentifier = NTV2_XptSDIIn3;
             mInputSource    = NTV2_INPUTSOURCE_SDI3;
+            cscInput = NTV2_XptCSC3VidInput;
+            cscOutput = mIsRGBA? NTV2_XptCSC3VidRGB : NTV2_XptCSC3VidYUV;
             break;
          case NTV2_CHANNEL4:
             inputIdentifier = NTV2_XptSDIIn4;
             mInputSource    = NTV2_INPUTSOURCE_SDI4;
+            cscInput = NTV2_XptCSC4VidInput;
+            cscOutput = mIsRGBA? NTV2_XptCSC4VidRGB : NTV2_XptCSC4VidYUV;
             break;
          case NTV2_CHANNEL5:
             inputIdentifier = NTV2_XptSDIIn5;
             mInputSource    = NTV2_INPUTSOURCE_SDI5;
+            cscInput = NTV2_XptCSC5VidInput;
+            cscOutput = mIsRGBA? NTV2_XptCSC5VidRGB : NTV2_XptCSC5VidYUV;
             break;
          case NTV2_CHANNEL6:
             inputIdentifier = NTV2_XptSDIIn6;
             mInputSource    = NTV2_INPUTSOURCE_SDI6;
+            cscInput = NTV2_XptCSC6VidInput;
+            cscOutput = mIsRGBA? NTV2_XptCSC6VidRGB : NTV2_XptCSC6VidYUV;
             break;
          case NTV2_CHANNEL7:
             inputIdentifier = NTV2_XptSDIIn7;
             mInputSource    = NTV2_INPUTSOURCE_SDI7;
+            cscInput = NTV2_XptCSC7VidInput;
+            cscOutput = mIsRGBA? NTV2_XptCSC7VidRGB : NTV2_XptCSC7VidYUV;
             break;
          case NTV2_CHANNEL8:
             inputIdentifier = NTV2_XptSDIIn8;
             mInputSource    = NTV2_INPUTSOURCE_SDI8;
+            cscInput = NTV2_XptCSC8VidInput;
+            cscOutput = mIsRGBA? NTV2_XptCSC8VidRGB : NTV2_XptCSC8VidYUV;
             break;
       }
 
@@ -553,29 +572,42 @@ AJAStatus NTV2GstAV::SetupVideo (void)
       break;
     case NTV2_INPUTSOURCE_HDMI1:
       // Select correct values based on channel
+      NTV2LHIHDMIColorSpace hdmiColor;
+      mDevice.GetHDMIInputColor (hdmiColor, mInputChannel);
+      inputRGB = hdmiColor == NTV2_LHIHDMIColorSpaceRGB;
       switch (mInputChannel) {
          default:
          case NTV2_CHANNEL1:
-            inputIdentifier = NTV2_XptHDMIIn1;
+            inputIdentifier = inputRGB? NTV2_XptHDMIIn1RGB : NTV2_XptHDMIIn1;
             mInputSource    = NTV2_INPUTSOURCE_HDMI1;
+            cscInput        = NTV2_XptCSC1VidInput;
+            cscOutput       = mIsRGBA? NTV2_XptCSC1VidRGB : NTV2_XptCSC1VidYUV;
             break;
          case NTV2_CHANNEL2:
-            inputIdentifier = NTV2_XptHDMIIn2;
+            inputIdentifier = inputRGB? NTV2_XptHDMIIn2RGB : NTV2_XptHDMIIn2;
             mInputSource    = NTV2_INPUTSOURCE_HDMI2;
+            cscInput        = NTV2_XptCSC2VidInput;
+            cscOutput       = mIsRGBA? NTV2_XptCSC2VidRGB : NTV2_XptCSC2VidYUV;
             break;
          case NTV2_CHANNEL3:
-            inputIdentifier = NTV2_XptHDMIIn3;
+            inputIdentifier = inputRGB? NTV2_XptHDMIIn3RGB : NTV2_XptHDMIIn3;
             mInputSource    = NTV2_INPUTSOURCE_HDMI3;
+            cscInput        = NTV2_XptCSC3VidInput;
+            cscOutput       = mIsRGBA? NTV2_XptCSC3VidRGB : NTV2_XptCSC3VidYUV;
             break;
          case NTV2_CHANNEL4:
-            inputIdentifier = NTV2_XptHDMIIn4;
+            inputIdentifier = inputRGB? NTV2_XptHDMIIn4RGB : NTV2_XptHDMIIn4;
             mInputSource    = NTV2_INPUTSOURCE_HDMI4;
+            cscInput        = NTV2_XptCSC4VidInput;
+            cscOutput       = mIsRGBA? NTV2_XptCSC4VidRGB : NTV2_XptCSC4VidYUV;
             break;
       }
       break;
     case NTV2_INPUTSOURCE_ANALOG1:
       inputIdentifier = NTV2_XptAnalogIn;
       mInputSource = NTV2_INPUTSOURCE_ANALOG1;
+      cscInput = NTV2_XptCSC1VidInput;
+      cscOutput = mIsRGBA? NTV2_XptCSC1VidRGB : NTV2_XptCSC1VidYUV;
       break;
     default:
       g_assert_not_reached ();
@@ -709,11 +741,16 @@ AJAStatus NTV2GstAV::SetupVideo (void)
         router.RemoveConnection(iter->first, iter->second);
     }
   } else {
-    // Need to only disconnect the input and its framebuffer
     NTV2ActualConnections connections = router.GetConnections();
 
+    // Disconnect input and its framebuffer
     for (NTV2ActualConnectionsConstIter iter = connections.begin(); iter != connections.end(); iter++) {
       if (iter->first == fbfInputSelect ||
+          iter->second == inputIdentifier)
+        router.RemoveConnection(iter->first, iter->second);
+
+    // Disconnect input and its csc
+      if (iter->first == cscInput ||
           iter->second == inputIdentifier)
         router.RemoveConnection(iter->first, iter->second);
 
@@ -739,13 +776,13 @@ AJAStatus NTV2GstAV::SetupVideo (void)
       inputIdentifier = NTV2_Xpt425Mux3AYUV;
   }
 
-  if (mIsRGBA) {
-    // Route the channel into the CSC for RGB conversion
-    router.AddConnection (NTV2_XptCSC1VidInput, inputIdentifier);
-    router.AddConnection (fbfInputSelect, NTV2_XptCSC1VidRGB);
-  } else {
+  if ((mIsRGBA && inputRGB) || (!mIsRGBA && !inputRGB)) {
     // Add to the mapping to the router for this channel
     router.AddConnection (fbfInputSelect, inputIdentifier);
+  } else {
+    // Route the channel into the CSC for color conversion
+    router.AddConnection (cscInput, inputIdentifier);
+    router.AddConnection (fbfInputSelect, cscOutput);
   }
 
   // Disable SDI output from the SDI input being used,
