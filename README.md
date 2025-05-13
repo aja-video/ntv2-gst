@@ -1,3 +1,12 @@
+# ⚠ **WARNING: This Repository is Unmaintained**
+05/12/2025
+
+This repository is no longer actively maintained. We appreciate your continued use, but are unable to provide ongoing support, bug fixes, or feature development.
+
+AJA has partnered with the Freedesktop project to provide an upstreamed version of this plugin. You can find documentation and information about the Freedesktop version here: [https://gstreamer.freedesktop.org/documentation/aja](https://gstreamer.freedesktop.org/documentation/aja).  This is now the recommended source for this plugin.
+
+We recommend caution when using this repository and cannot guarantee stability or compatibility. Thank you for your understanding.
+
 # AJA NTV2 GStreamer
 
 ## Overview
